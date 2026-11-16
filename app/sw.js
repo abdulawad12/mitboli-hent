@@ -1,6 +1,6 @@
 /* Gemmer web-appen på telefonen. Siden hentes altid frisk, når der er net (så nye versioner kommer med det samme),
    og fra telefonens lager, når der ikke er. Kun filer fra dette site; alt andet går direkte til nettet. */
-var CACHE = 'mitboli-ff54422e34';
+var CACHE = 'mitboli-97ce13836f';
 var CORE = ['./', 'index.html', 'manifest.webmanifest', 'pwa.js', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png', 'favicon.png'];
 
 self.addEventListener('install', function (e) {

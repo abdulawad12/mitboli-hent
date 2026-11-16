@@ -5284,6 +5284,802 @@ tickClock(); setInterval(tickClock,30000);
 setInterval(()=>{ const ae=document.activeElement; if(dashVisible()&&SESS.staff&&!D.modal&&!D.gOpen&&!(ae&&ae.closest&&ae.closest('#dash')&&/TEXTAREA|SELECT|INPUT|BUTTON/.test(ae.tagName))) renderDash(); },60000);
 route();
 paintAI();
+/* ---- Min bolig (før app-tilstanden, som tegner skærmen igen) ---- */
+/* Min bolig i appen: det samme som beboerportalen på hjemmesiden.
+   Husleje og forbrug, booking af fælleslokaler, dokumenter, blanketter og opsigelse, beboerdemokrati og kontakt.
+   Driftslederen besvarer ansøgningerne under "Selvbetjening". Alle data er opdigtede og ligger kun på telefonen.
+   Kører inde i demoens kode (efter app-mode.js) og bruger dens funktioner: S, T, D, go, renderApp, save, t, ic, esc … */
+(function () {
+  'use strict';
+
+  /* ---------- Tekster (da / en / ar) ---------- */
+  const NOTICE = {
+    da: 'Opsigelsesvarslet er 3 måneder til den første hverdag i en måned, der ikke er dagen før en helligdag (almenlejeloven § 88).',
+    en: 'The notice period is 3 months to the first working day of a month that is not the day before a public holiday (Danish Social Housing Rent Act, section 88).',
+    ar: 'مدة الإشعار 3 أشهر حتى أول يوم عمل في الشهر لا يسبق عطلة رسمية (قانون إيجار المساكن الاجتماعية، المادة 88).'
+  };
+  const MBT = {
+    da: {
+      hub_h: 'Selvbetjening', okonomi: 'Husleje og forbrug', okonomi_s: 'Opkrævninger og forbrugsregnskab', booking: 'Book lokale', booking_s: 'Selskabslokale, gæsteværelse og vaskeri',
+      docs: 'Dokumenter', docs_s: 'Husorden, referater og lejekontrakt', self: 'Blanketter og ansøgninger', self_s: 'Råderet, husdyr, fremleje og opsigelse',
+      demo: 'Beboerdemokrati', demo_s: 'Afdelingsmøde og bestyrelse', kontakt: 'Kontakt', kontakt_s: 'Driftskontor, vicevært og vagttelefon',
+      now_h: 'Lige nu', q_book: 'Book lokale', q_rent: 'Husleje', q_self: 'Blanketter', q_contact: 'Kontakt',
+      a_rent: a => 'Næste husleje: ' + a, a_rent_s: d => 'Forfalder ' + d, a_book: f => 'Booking: ' + f, a_app: k => 'Svar på din ansøgning: ' + k,
+      a_dead: 'Frist for forslag til afdelingsmødet', a_move: d => 'Du flytter den ' + d,
+      in_days: n => n === 0 ? 'i dag' : n === 1 ? 'i morgen' : 'om ' + n + ' dage',
+      next_charge: 'Næste opkrævning', due: d => 'Forfalder ' + d, paid_on: d => 'Betalt ' + d, st_paid: 'Betalt', st_due: 'Forfalder', st_over: 'Forfalden',
+      balance: 'Saldo', bal0: 'Du skylder ikke noget.', compose: 'Sådan er huslejen sammensat', l_rent: 'Husleje', l_heat: 'A conto varme', l_water: 'A conto vand', l_total: 'I alt pr. måned',
+      q_aconto: 'Hvad er a conto?', a_aconto: 'Du betaler et fast beløb hver måned for varme og vand. Når året er gået, sammenlignes det med dit faktiske forbrug. Har du brugt mindre, får du penge tilbage. Har du brugt mere, betaler du forskellen.',
+      charges: 'Opkrævninger', cons: 'Forbrugsregnskab', q_cons: 'Hvornår kommer forbrugsregnskabet?', a_cons: 'Én gang om året, normalt 3–4 måneder efter, at regnskabsåret er slut. En efterbetaling eller tilbagebetaling kommer med huslejen.',
+      k_varme: 'Varme', k_vand: 'Vand', aconto: 'A conto', actual: 'Faktisk forbrug', after: 'Efterbetaling', back: 'Tilbagebetaling', usage: 'Forbrug',
+      pay_note: 'Husleje betales via Betalingsservice. I den rigtige app kommer tallene fra boligorganisationens boligsystem.',
+      facs: 'Fælleslokaler', price: 'Pris', deposit: 'Depositum', free: 'Gratis', rules: 'Regler', choose_time: 'Vælg tid', my_b: 'Mine bookinger', no_b: 'Du har ingen kommende bookinger.',
+      past_b: 'Tidligere', per_day: 'pr. dag', open_h: (a, b) => 'Åbent ' + a + '–' + b, max_h: n => 'højst ' + n + ' timer',
+      pick_day: 'Vælg dag', busy: 'Optaget', yours: 'Din', pick_time: 'Vælg tidsrum', pick_time_s: n => 'Tryk på starttid og derefter sluttid. Højst ' + n + ' timer.',
+      confirm_h: 'Bekræft booking', note: 'Note (valgfri)', read_rules: 'Jeg har læst reglerne', do_book: 'Book', cancel: 'Aflys', cancel_q: 'Vil du aflyse bookingen?', yes_cancel: 'Ja, aflys', keep: 'Behold',
+      booked_h: f => 'Du har booket ' + f, key_note: 'Nøglen hentes på driftskontoret. Et eventuelt depositum betales, når du henter nøglen.', add_cal: 'Føj til kalender',
+      e_taken: 'Tidspunktet blev lige booket af en anden. Vælg et andet.', e_limit: (n, f) => 'Din husstand kan højst have ' + n + ' kommende bookinger af ' + f + '.', e_ahead: n => 'Du kan højst booke ' + n + ' dage frem.',
+      e_maxh: n => 'Du kan højst booke ' + n + ' timer ad gangen.', e_rules: 'Sæt kryds ved, at du har læst reglerne.', e_past: 'Tidspunktet er allerede passeret.', e_overlap: 'Tidsrummet overlapper en anden booking.',
+      search: 'Søg i dokumenter', all: 'Alle', only_you: 'Kun til dig', no_docs: 'Ingen dokumenter passer på søgningen.', only_da: 'Dokumentet findes kun på dansk.', only_da_r: 'Svaret er skrevet på dansk.', demo_doc: 'Opdigtet dokument i demoen.',
+      c_husorden: 'Husorden', c_vedligeholdelse: 'Vedligeholdelse', c_raaderet: 'Råderet', c_regnskab: 'Regnskab', c_budget: 'Budget', c_referat: 'Referater', c_beboerinfo: 'Beboerinfo', c_kontrakt: 'Lejekontrakt',
+      self_intro: 'Send en ansøgning eller blanket direkte til driftskontoret, og følg svaret her.', fill: 'Udfyld',
+      k_raaderet: 'Råderet', k_husdyr: 'Husdyr', k_fremleje: 'Fremleje', k_hvidevarer: 'Hårde hvidevarer', k_opsigelse: 'Opsigelse', k_forslag: 'Forslag til afdelingsmødet', k_andet: 'Anden henvendelse',
+      d_raaderet: 'Ændringer du selv vil lave i boligen, fx nyt køkken eller en ny væg. Driften skal godkende, før du går i gang.',
+      d_husdyr: 'Ansøg om at holde hund eller kat. Husordenen siger, hvad der er tilladt.', d_fremleje: 'Du må fremleje i en periode, fx ved studieophold. Skriv perioden og årsagen.',
+      d_hvidevarer: 'Bed om at få udskiftet eller sat hårde hvidevarer op.', d_opsigelse: 'Opsig dit lejemål. Vi viser de datoer, du kan flytte til.',
+      d_forslag: 'Send et forslag til afdelingsmødet.', d_andet: 'En anden henvendelse til driftskontoret.',
+      mine: 'Mine ansøgninger', no_apps: 'Du har ikke sendt nogen ansøgninger endnu.', s_received: 'Modtaget', s_approved: 'Godkendt', s_rejected: 'Afslået', s_withdrawn: 'Trukket tilbage',
+      sent_on: d => 'Sendt ' + d, decided_on: d => 'Besvaret ' + d, reply: 'Svar fra driften', withdraw: 'Træk tilbage', wd_q: 'Vil du trække ansøgningen tilbage?', yes_wd: 'Ja, træk tilbage',
+      f_description: 'Beskriv ændringen', f_animal: 'Hvilket dyr?', f_desc2: 'Mere om dyret', f_from: 'Fra dato', f_to: 'Til dato', f_reason: 'Årsag', f_appliance: 'Hvilken hvidevare?', f_desc3: 'Hvad er der galt?',
+      f_title: 'Overskrift', f_text: 'Dit forslag', f_subject: 'Emne', f_text2: 'Din besked', optional: 'valgfri', send_app: 'Send', sent_ok: 'Sendt. Driftskontoret svarer normalt inden for 5 hverdage.',
+      demo_hint: 'Demo: Skift rolle til driftslederen Lise Holm, og åbn "Selvbetjening" for at svare.', e_fill: f => 'Udfyld "' + f + '".', e_min10: 'Skriv lidt mere (mindst 10 tegn).', e_dates: 'Slutdatoen skal ligge efter startdatoen.',
+      step: n => 'Trin ' + n + ' af 3', not_primary: 'Kun den, der står på lejekontrakten, kan opsige. Kontakt driftskontoret, hvis du skal flytte ud alene.',
+      choose_date: 'Vælg fraflytningsdato', ops_pay: 'Du betaler husleje til og med dagen før fraflytningsdatoen.', ops_syn: 'Driften kontakter dig om flyttesyn.',
+      ops_contact: 'Hvor kan vi kontakte dig efter flytningen?', f_newaddr: 'Ny adresse', f_email: 'E-mail', f_phone: 'Telefon', next: 'Næste', prev: 'Tilbage',
+      sure: 'Er du sikker?', ops_sum: (a, d) => 'Du opsiger lejemålet ' + a + ' til fraflytning den ' + d + '.', ops_send: 'Send opsigelse', ops_done: 'Opsigelsen er sendt',
+      ops_done_s: 'Driftskontoret bekræfter datoen og kontakter dig om flyttesyn.', e_exists: 'Lejemålet er allerede opsagt. Kontakt driftskontoret for at ændre datoen.', e_date: 'Vælg en fraflytningsdato.',
+      demo_intro: 'I en almen bolig bestemmer beboerne. Afdelingsmødet vælger bestyrelsen og godkender budgettet, og dermed huslejen.',
+      meet_h: 'Næste afdelingsmøde', place: 'Sted', agenda: 'Dagsorden', deadline: d => 'Frist for forslag: ' + d, dead_passed: 'Fristen er overskredet. Du kan stadig tage det op under Eventuelt.',
+      send_prop: 'Send forslag', board_h: 'Afdelingsbestyrelsen', minutes_h: 'Referater, regnskab og budget', all_docs: 'Alle dokumenter', add_cal_m: 'Føj mødet til kalender',
+      akut_h: 'Akut skade uden for kontorets åbningstid', akut_ex: 'Fx vandskade, ingen varme eller låst ude.', call: n => 'Ring ' + n, call112: 'Ring 112 ved brand og personskade.',
+      demo_call: 'Demo: I den rigtige app ringer knappen op.', office_h: 'Driftskontoret', hours: 'Man–tors kl. 7.30–15, fre kl. 7.30–12', caretaker_h: 'Din vicevært',
+      report: 'Meld fejl', write: 'Send en henvendelse', open_now: 'Åbent nu', closed_now: 'Lukket nu',
+      m_formand: 'Formand', m_naest: 'Næstformand', m_kasserer: 'Kasserer', m_medlem: 'Bestyrelsesmedlem',
+      ag: ['Valg af dirigent', 'Bestyrelsens beretning', 'Regnskab for 2025', 'Indkomne forslag', 'Budget for 2027', 'Valg til bestyrelsen', 'Eventuelt'],
+      place_v: 'Fælleshuset ved nr. 16'
+    },
+    en: {
+      hub_h: 'Self-service', okonomi: 'Rent and utilities', okonomi_s: 'Charges and utility statements', booking: 'Book a room', booking_s: 'Party room, guest room and laundry',
+      docs: 'Documents', docs_s: 'House rules, minutes and lease', self: 'Forms and applications', self_s: 'Alterations, pets, subletting and notice',
+      demo: 'Resident democracy', demo_s: 'Residents’ meeting and board', kontakt: 'Contact', kontakt_s: 'Office, caretaker and emergency line',
+      now_h: 'Right now', q_book: 'Book a room', q_rent: 'Rent', q_self: 'Forms', q_contact: 'Contact',
+      a_rent: a => 'Next rent: ' + a, a_rent_s: d => 'Due ' + d, a_book: f => 'Booking: ' + f, a_app: k => 'Reply to your application: ' + k,
+      a_dead: 'Deadline for proposals to the residents’ meeting', a_move: d => 'You move out on ' + d,
+      in_days: n => n === 0 ? 'today' : n === 1 ? 'tomorrow' : 'in ' + n + ' days',
+      next_charge: 'Next charge', due: d => 'Due ' + d, paid_on: d => 'Paid ' + d, st_paid: 'Paid', st_due: 'Due', st_over: 'Overdue',
+      balance: 'Balance', bal0: 'You owe nothing.', compose: 'What your rent is made of', l_rent: 'Rent', l_heat: 'Heating on account', l_water: 'Water on account', l_total: 'Total per month',
+      q_aconto: 'What does "on account" mean?', a_aconto: 'You pay a fixed amount each month for heating and water. After the year, it is compared with what you actually used. If you used less, you get money back. If you used more, you pay the difference.',
+      charges: 'Charges', cons: 'Utility statements', q_cons: 'When does the utility statement come?', a_cons: 'Once a year, usually 3–4 months after the accounting year ends. Any extra payment or refund comes with your rent.',
+      k_varme: 'Heating', k_vand: 'Water', aconto: 'On account', actual: 'Actual use', after: 'Extra payment', back: 'Refund', usage: 'Use',
+      pay_note: 'Rent is paid by direct debit (Betalingsservice). In the real app the figures come from the housing association’s system.',
+      facs: 'Shared rooms', price: 'Price', deposit: 'Deposit', free: 'Free', rules: 'Rules', choose_time: 'Choose a time', my_b: 'My bookings', no_b: 'You have no upcoming bookings.',
+      past_b: 'Earlier', per_day: 'per day', open_h: (a, b) => 'Open ' + a + '–' + b, max_h: n => 'max ' + n + ' hours',
+      pick_day: 'Choose a day', busy: 'Taken', yours: 'Yours', pick_time: 'Choose a time', pick_time_s: n => 'Tap the start time, then the end time. Max ' + n + ' hours.',
+      confirm_h: 'Confirm booking', note: 'Note (optional)', read_rules: 'I have read the rules', do_book: 'Book', cancel: 'Cancel', cancel_q: 'Do you want to cancel the booking?', yes_cancel: 'Yes, cancel', keep: 'Keep it',
+      booked_h: f => 'You have booked the ' + f, key_note: 'Collect the key at the office. Any deposit is paid when you collect the key.', add_cal: 'Add to calendar',
+      e_taken: 'Someone just booked that time. Please choose another.', e_limit: (n, f) => 'Your household can have at most ' + n + ' upcoming bookings of the ' + f + '.', e_ahead: n => 'You can book at most ' + n + ' days ahead.',
+      e_maxh: n => 'You can book at most ' + n + ' hours at a time.', e_rules: 'Please tick that you have read the rules.', e_past: 'That time has already passed.', e_overlap: 'The time overlaps another booking.',
+      search: 'Search documents', all: 'All', only_you: 'Only for you', no_docs: 'No documents match your search.', only_da: 'This document is only available in Danish.', only_da_r: 'The reply is written in Danish.', demo_doc: 'Made-up document in the demo.',
+      c_husorden: 'House rules', c_vedligeholdelse: 'Maintenance', c_raaderet: 'Alterations', c_regnskab: 'Accounts', c_budget: 'Budget', c_referat: 'Minutes', c_beboerinfo: 'Resident info', c_kontrakt: 'Lease',
+      self_intro: 'Send an application or form straight to the office, and follow the reply here.', fill: 'Fill in',
+      k_raaderet: 'Alterations', k_husdyr: 'Pets', k_fremleje: 'Subletting', k_hvidevarer: 'Large appliances', k_opsigelse: 'Notice to move out', k_forslag: 'Proposal for the residents’ meeting', k_andet: 'Other enquiry',
+      d_raaderet: 'Changes you want to make to your home, e.g. a new kitchen or a new wall. The office must approve before you start.',
+      d_husdyr: 'Apply to keep a dog or a cat. The house rules say what is allowed.', d_fremleje: 'You may sublet for a period, e.g. while studying abroad. Give the period and the reason.',
+      d_hvidevarer: 'Ask to have large appliances replaced or installed.', d_opsigelse: 'Give notice on your home. We show the dates you can move out on.',
+      d_forslag: 'Send a proposal to the residents’ meeting.', d_andet: 'Another enquiry to the office.',
+      mine: 'My applications', no_apps: 'You have not sent any applications yet.', s_received: 'Received', s_approved: 'Approved', s_rejected: 'Declined', s_withdrawn: 'Withdrawn',
+      sent_on: d => 'Sent ' + d, decided_on: d => 'Answered ' + d, reply: 'Reply from the office', withdraw: 'Withdraw', wd_q: 'Do you want to withdraw the application?', yes_wd: 'Yes, withdraw',
+      f_description: 'Describe the change', f_animal: 'Which animal?', f_desc2: 'More about the animal', f_from: 'From', f_to: 'To', f_reason: 'Reason', f_appliance: 'Which appliance?', f_desc3: 'What is wrong?',
+      f_title: 'Title', f_text: 'Your proposal', f_subject: 'Subject', f_text2: 'Your message', optional: 'optional', send_app: 'Send', sent_ok: 'Sent. The office usually replies within 5 working days.',
+      demo_hint: 'Demo: Switch role to the manager Lise Holm and open "Selvbetjening" to reply.', e_fill: f => 'Please fill in "' + f + '".', e_min10: 'Please write a little more (at least 10 characters).', e_dates: 'The end date must be after the start date.',
+      step: n => 'Step ' + n + ' of 3', not_primary: 'Only the person on the lease can give notice. Contact the office if you are moving out alone.',
+      choose_date: 'Choose your move-out date', ops_pay: 'You pay rent up to and including the day before the move-out date.', ops_syn: 'The office will contact you about the move-out inspection.',
+      ops_contact: 'How can we reach you after you move?', f_newaddr: 'New address', f_email: 'Email', f_phone: 'Phone', next: 'Next', prev: 'Back',
+      sure: 'Are you sure?', ops_sum: (a, d) => 'You are giving notice on ' + a + ' with move-out on ' + d + '.', ops_send: 'Send notice', ops_done: 'Your notice has been sent',
+      ops_done_s: 'The office will confirm the date and contact you about the move-out inspection.', e_exists: 'Notice has already been given on this home. Contact the office to change the date.', e_date: 'Please choose a move-out date.',
+      demo_intro: 'In social housing, the residents decide. The residents’ meeting elects the board and approves the budget, and with it the rent.',
+      meet_h: 'Next residents’ meeting', place: 'Place', agenda: 'Agenda', deadline: d => 'Deadline for proposals: ' + d, dead_passed: 'The deadline has passed. You can still raise it under any other business.',
+      send_prop: 'Send a proposal', board_h: 'The estate board', minutes_h: 'Minutes, accounts and budget', all_docs: 'All documents', add_cal_m: 'Add the meeting to your calendar',
+      akut_h: 'Emergency outside office hours', akut_ex: 'E.g. water damage, no heating or locked out.', call: n => 'Call ' + n, call112: 'Call 112 for fire or injury.',
+      demo_call: 'Demo: In the real app this button makes the call.', office_h: 'The office', hours: 'Mon–Thu 7:30–15:00, Fri 7:30–12:00', caretaker_h: 'Your caretaker',
+      report: 'Report a problem', write: 'Send an enquiry', open_now: 'Open now', closed_now: 'Closed now',
+      m_formand: 'Chair', m_naest: 'Vice chair', m_kasserer: 'Treasurer', m_medlem: 'Board member',
+      ag: ['Election of chair', 'The board’s report', 'Accounts for 2025', 'Proposals received', 'Budget for 2027', 'Board elections', 'Any other business'],
+      place_v: 'Community house at no. 16'
+    },
+    ar: {
+      hub_h: 'الخدمة الذاتية', okonomi: 'الإيجار والاستهلاك', okonomi_s: 'المطالبات وكشف الاستهلاك', booking: 'حجز قاعة', booking_s: 'قاعة الحفلات وغرفة الضيوف والمغسلة',
+      docs: 'المستندات', docs_s: 'النظام الداخلي والمحاضر وعقد الإيجار', self: 'النماذج والطلبات', self_s: 'التعديلات والحيوانات والإيجار من الباطن والإخلاء',
+      demo: 'ديمقراطية السكان', demo_s: 'اجتماع السكان ومجلس الإدارة', kontakt: 'اتصل بنا', kontakt_s: 'المكتب والحارس وهاتف الطوارئ',
+      now_h: 'الآن', q_book: 'حجز قاعة', q_rent: 'الإيجار', q_self: 'النماذج', q_contact: 'اتصل بنا',
+      a_rent: a => 'الإيجار القادم: ' + a, a_rent_s: d => 'يستحق في ' + d, a_book: f => 'حجز: ' + f, a_app: k => 'رد على طلبك: ' + k,
+      a_dead: 'آخر موعد لتقديم المقترحات لاجتماع السكان', a_move: d => 'تغادر السكن في ' + d,
+      in_days: n => n === 0 ? 'اليوم' : n === 1 ? 'غدًا' : 'بعد ' + n + ' أيام',
+      next_charge: 'المطالبة القادمة', due: d => 'يستحق في ' + d, paid_on: d => 'دُفع في ' + d, st_paid: 'مدفوع', st_due: 'مستحق', st_over: 'متأخر',
+      balance: 'الرصيد', bal0: 'ليس عليك أي مبلغ.', compose: 'مكونات الإيجار', l_rent: 'الإيجار', l_heat: 'دفعة مقدمة للتدفئة', l_water: 'دفعة مقدمة للمياه', l_total: 'المجموع شهريًا',
+      q_aconto: 'ما معنى الدفعة المقدمة؟', a_aconto: 'تدفع مبلغًا ثابتًا كل شهر للتدفئة والمياه. وبعد انتهاء السنة يُقارن بما استهلكته فعلًا. إذا استهلكت أقل تسترد المال، وإذا استهلكت أكثر تدفع الفرق.',
+      charges: 'المطالبات', cons: 'كشف الاستهلاك', q_cons: 'متى يصل كشف الاستهلاك؟', a_cons: 'مرة في السنة، عادة بعد 3–4 أشهر من نهاية السنة المحاسبية. ويُضاف المبلغ الإضافي أو المسترد إلى الإيجار.',
+      k_varme: 'التدفئة', k_vand: 'المياه', aconto: 'دفعة مقدمة', actual: 'الاستهلاك الفعلي', after: 'مبلغ إضافي', back: 'مبلغ مسترد', usage: 'الاستهلاك',
+      pay_note: 'يُدفع الإيجار عبر الخصم المباشر (Betalingsservice). في التطبيق الحقيقي تأتي الأرقام من نظام الجمعية السكنية.',
+      facs: 'القاعات المشتركة', price: 'السعر', deposit: 'التأمين', free: 'مجانًا', rules: 'القواعد', choose_time: 'اختر الوقت', my_b: 'حجوزاتي', no_b: 'ليس لديك حجوزات قادمة.',
+      past_b: 'سابقة', per_day: 'لليوم', open_h: (a, b) => 'مفتوح ' + a + '–' + b, max_h: n => 'بحد أقصى ' + n + ' ساعات',
+      pick_day: 'اختر اليوم', busy: 'محجوز', yours: 'حجزك', pick_time: 'اختر المدة', pick_time_s: n => 'اضغط على وقت البداية ثم وقت النهاية. بحد أقصى ' + n + ' ساعات.',
+      confirm_h: 'تأكيد الحجز', note: 'ملاحظة (اختياري)', read_rules: 'قرأت القواعد', do_book: 'احجز', cancel: 'إلغاء', cancel_q: 'هل تريد إلغاء الحجز؟', yes_cancel: 'نعم، ألغِ', keep: 'احتفظ به',
+      booked_h: f => 'لقد حجزت ' + f, key_note: 'استلم المفتاح من المكتب. يُدفع التأمين، إن وُجد، عند استلام المفتاح.', add_cal: 'أضف إلى التقويم',
+      e_taken: 'حجز شخص آخر هذا الوقت للتو. اختر وقتًا آخر.', e_limit: (n, f) => 'يمكن لأسرتك أن يكون لديها ' + n + ' حجوزات قادمة كحد أقصى في ' + f + '.', e_ahead: n => 'يمكنك الحجز قبل ' + n + ' يومًا كحد أقصى.',
+      e_maxh: n => 'يمكنك حجز ' + n + ' ساعات كحد أقصى في المرة الواحدة.', e_rules: 'ضع علامة على أنك قرأت القواعد.', e_past: 'هذا الوقت قد مضى.', e_overlap: 'المدة تتداخل مع حجز آخر.',
+      search: 'ابحث في المستندات', all: 'الكل', only_you: 'لك وحدك', no_docs: 'لا توجد مستندات تطابق البحث.', only_da: 'هذا المستند متوفر باللغة الدنماركية فقط.', only_da_r: 'الرد مكتوب باللغة الدنماركية.', demo_doc: 'مستند وهمي في النسخة التجريبية.',
+      c_husorden: 'النظام الداخلي', c_vedligeholdelse: 'الصيانة', c_raaderet: 'التعديلات', c_regnskab: 'الحسابات', c_budget: 'الميزانية', c_referat: 'المحاضر', c_beboerinfo: 'معلومات للسكان', c_kontrakt: 'عقد الإيجار',
+      self_intro: 'أرسل طلبًا أو نموذجًا مباشرة إلى المكتب، وتابع الرد هنا.', fill: 'املأ',
+      k_raaderet: 'تعديلات في السكن', k_husdyr: 'الحيوانات الأليفة', k_fremleje: 'الإيجار من الباطن', k_hvidevarer: 'الأجهزة المنزلية الكبيرة', k_opsigelse: 'إشعار الإخلاء', k_forslag: 'مقترح لاجتماع السكان', k_andet: 'استفسار آخر',
+      d_raaderet: 'تغييرات تريد إجراءها في سكنك، مثل مطبخ جديد أو جدار جديد. يجب أن يوافق المكتب قبل أن تبدأ.',
+      d_husdyr: 'قدّم طلبًا لتربية كلب أو قطة. يحدد النظام الداخلي ما هو مسموح.', d_fremleje: 'يمكنك التأجير من الباطن لفترة، مثلًا أثناء الدراسة في الخارج. اكتب المدة والسبب.',
+      d_hvidevarer: 'اطلب استبدال الأجهزة المنزلية الكبيرة أو تركيبها.', d_opsigelse: 'أنهِ عقد سكنك. نعرض لك التواريخ التي يمكنك المغادرة فيها.',
+      d_forslag: 'أرسل مقترحًا إلى اجتماع السكان.', d_andet: 'استفسار آخر إلى المكتب.',
+      mine: 'طلباتي', no_apps: 'لم ترسل أي طلبات بعد.', s_received: 'تم الاستلام', s_approved: 'تمت الموافقة', s_rejected: 'مرفوض', s_withdrawn: 'تم السحب',
+      sent_on: d => 'أُرسل في ' + d, decided_on: d => 'تم الرد في ' + d, reply: 'رد المكتب', withdraw: 'اسحب الطلب', wd_q: 'هل تريد سحب الطلب؟', yes_wd: 'نعم، اسحبه',
+      f_description: 'صف التغيير', f_animal: 'أي حيوان؟', f_desc2: 'المزيد عن الحيوان', f_from: 'من تاريخ', f_to: 'إلى تاريخ', f_reason: 'السبب', f_appliance: 'أي جهاز؟', f_desc3: 'ما المشكلة؟',
+      f_title: 'العنوان', f_text: 'مقترحك', f_subject: 'الموضوع', f_text2: 'رسالتك', optional: 'اختياري', send_app: 'أرسل', sent_ok: 'تم الإرسال. يرد المكتب عادة خلال 5 أيام عمل.',
+      demo_hint: 'تجريبي: بدّل الدور إلى مديرة التشغيل ليزه هولم وافتح "Selvbetjening" للرد.', e_fill: f => 'املأ "' + f + '".', e_min10: 'اكتب أكثر قليلًا (10 أحرف على الأقل).', e_dates: 'يجب أن يكون تاريخ النهاية بعد تاريخ البداية.',
+      step: n => 'الخطوة ' + n + ' من 3', not_primary: 'فقط الشخص المسجل في عقد الإيجار يمكنه إنهاء العقد. تواصل مع المكتب إذا كنت ستغادر وحدك.',
+      choose_date: 'اختر تاريخ المغادرة', ops_pay: 'تدفع الإيجار حتى اليوم السابق لتاريخ المغادرة.', ops_syn: 'سيتواصل معك المكتب بشأن معاينة المغادرة.',
+      ops_contact: 'كيف يمكننا التواصل معك بعد الانتقال؟', f_newaddr: 'العنوان الجديد', f_email: 'البريد الإلكتروني', f_phone: 'الهاتف', next: 'التالي', prev: 'رجوع',
+      sure: 'هل أنت متأكد؟', ops_sum: (a, d) => 'أنت تنهي عقد السكن ' + a + ' وتغادر في ' + d + '.', ops_send: 'أرسل الإشعار', ops_done: 'تم إرسال إشعار الإخلاء',
+      ops_done_s: 'سيؤكد المكتب التاريخ ويتواصل معك بشأن معاينة المغادرة.', e_exists: 'تم إرسال إشعار إخلاء لهذا السكن بالفعل. تواصل مع المكتب لتغيير التاريخ.', e_date: 'اختر تاريخ المغادرة.',
+      demo_intro: 'في السكن الاجتماعي يقرر السكان. يختار اجتماع السكان مجلس الإدارة ويوافق على الميزانية، وبالتالي على الإيجار.',
+      meet_h: 'اجتماع السكان القادم', place: 'المكان', agenda: 'جدول الأعمال', deadline: d => 'آخر موعد للمقترحات: ' + d, dead_passed: 'انتهى الموعد. يمكنك طرح الموضوع تحت بند ما يستجد من أعمال.',
+      send_prop: 'أرسل مقترحًا', board_h: 'مجلس إدارة الحي', minutes_h: 'المحاضر والحسابات والميزانية', all_docs: 'كل المستندات', add_cal_m: 'أضف الاجتماع إلى التقويم',
+      akut_h: 'ضرر طارئ خارج ساعات عمل المكتب', akut_ex: 'مثل تسرب المياه أو انقطاع التدفئة أو الإغلاق خارج الباب.', call: n => 'اتصل بـ ' + n, call112: 'اتصل بـ 112 في حالة الحريق أو الإصابة.',
+      demo_call: 'تجريبي: في التطبيق الحقيقي يتصل هذا الزر.', office_h: 'المكتب', hours: 'الاثنين–الخميس 7:30–15:00، الجمعة 7:30–12:00', caretaker_h: 'الحارس المسؤول عنك',
+      report: 'أبلغ عن عطل', write: 'أرسل استفسارًا', open_now: 'مفتوح الآن', closed_now: 'مغلق الآن',
+      m_formand: 'الرئيس', m_naest: 'نائب الرئيس', m_kasserer: 'أمين الصندوق', m_medlem: 'عضو مجلس الإدارة',
+      ag: ['اختيار مدير الجلسة', 'تقرير مجلس الإدارة', 'حسابات 2025', 'المقترحات الواردة', 'ميزانية 2027', 'انتخابات مجلس الإدارة', 'ما يستجد من أعمال'],
+      place_v: 'البيت المشترك عند المبنى رقم 16'
+    }
+  };
+  const mt = (k, ...a) => { const d = MBT[S.lang] || MBT.da; const v = d[k] !== undefined ? d[k] : MBT.da[k]; return typeof v === 'function' ? v(...a) : v === undefined ? k : v; };
+  const da = (k, ...a) => { const v = MBT.da[k]; return typeof v === 'function' ? v(...a) : v; };
+
+  /* ---------- Datoer ---------- */
+  const DAYMS = 864e5;
+  const ymd = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  const todayYmd = () => ymd(new Date());
+  const parseYmd = s => { const p = s.split('-').map(Number); return new Date(p[0], p[1] - 1, p[2]); };
+  const addDaysYmd = (s, n) => { const d = parseYmd(s); d.setDate(d.getDate() + n); return ymd(d); };
+  const daysUntil = s => Math.round((parseYmd(s) - parseYmd(todayYmd())) / DAYMS);
+  const atTime = (s, hm) => { const d = parseYmd(s); const p = hm.split(':').map(Number); d.setHours(p[0], p[1], 0, 0); return d.getTime(); };
+  const hmOf = ts => { const d = new Date(ts); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+  const dFull = (v, lang) => fmt(lang || S.lang, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }, 'mbF').format(typeof v === 'string' ? parseYmd(v) : new Date(v));
+  const dDate = (v, lang) => fmtDL(typeof v === 'string' ? parseYmd(v) : v, lang || S.lang);
+  const monthName = (y, m) => fmt(S.lang, { month: 'long', year: 'numeric' }, 'mbM').format(new Date(y, m, 1));
+  const tme = hm => S.lang === 'da' ? hm.replace(':', '.') : hm;
+
+  /* Opsigelse: almenlejeloven § 88 (samme regler som serveren og hjemmesiden). */
+  const iso = d => d.toISOString().slice(0, 10);
+  const utc = (y, m, d) => new Date(Date.UTC(y, m, d));
+  const addD = (d, n) => new Date(d.getTime() + n * DAYMS);
+  function easter(y) {
+    const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;
+    const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+    const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const month = Math.floor((h + l - 7 * m + 114) / 31), day = ((h + l - 7 * m + 114) % 31) + 1;
+    return utc(y, month - 1, day);
+  }
+  const HOL = {};
+  function holidays(y) {
+    if (HOL[y]) return HOL[y];
+    const e = easter(y);
+    return (HOL[y] = new Set([utc(y, 0, 1), addD(e, -3), addD(e, -2), e, addD(e, 1), ...(y < 2024 ? [addD(e, 26)] : []), addD(e, 39), addD(e, 49), addD(e, 50), utc(y, 11, 25), utc(y, 11, 26)].map(iso)));
+  }
+  const isHol = d => holidays(d.getUTCFullYear()).has(iso(d));
+  const isWork = d => { const w = d.getUTCDay(); return w !== 0 && w !== 6 && !isHol(d); };
+  function firstValidDay(y, m) { let d = utc(y, m, 1); while (!isWork(d) || isHol(addD(d, 1))) d = addD(d, 1); return d; }
+  function earliestMoveOut(given) {
+    const g = new Date(given + 'T00:00:00Z');
+    const last = utc(g.getUTCFullYear(), g.getUTCMonth() + 4, 0).getUTCDate();
+    const min = utc(g.getUTCFullYear(), g.getUTCMonth() + 3, Math.min(g.getUTCDate(), last));
+    for (let i = 0; i < 4; i++) { const c = firstValidDay(min.getUTCFullYear(), min.getUTCMonth() + i); if (c >= min) return iso(c); }
+    return iso(min);
+  }
+  function moveOutOptions(n) {
+    const e = new Date(earliestMoveOut(todayYmd()) + 'T00:00:00Z');
+    return Array.from({ length: n }, (_, i) => iso(firstValidDay(e.getUTCFullYear(), e.getUTCMonth() + i)));
+  }
+
+  /* ---------- Data ---------- */
+  const FAC = [
+    { id: 'f1', kind: 'party', name: { da: 'Selskabslokalet', en: 'party room', ar: 'قاعة الحفلات' }, slot: 'day', price: 500, deposit: 1000, ahead: 180, maxActive: 2, open: ['08:00', '24:00'], maxH: 0,
+      desc: { da: 'Plads til 40 personer. Køkken med service til 50.', en: 'Room for 40 people. Kitchen with tableware for 50.', ar: 'تتسع لـ 40 شخصًا. مطبخ مع أدوات مائدة لـ 50 شخصًا.' },
+      rules: { da: 'Lokalet skal være ryddet og gjort rent kl. 10 dagen efter. Musikken skrues ned kl. 24. Rygning er ikke tilladt.', en: 'The room must be tidied and cleaned by 10:00 the next day. Music must be turned down at midnight. No smoking.', ar: 'يجب ترتيب القاعة وتنظيفها بحلول الساعة 10 في اليوم التالي. تُخفض الموسيقى عند منتصف الليل. التدخين ممنوع.' } },
+    { id: 'f2', kind: 'guest', name: { da: 'Gæsteværelset', en: 'guest room', ar: 'غرفة الضيوف' }, slot: 'day', price: 150, deposit: 0, ahead: 90, maxActive: 3, open: ['14:00', '11:00'], maxH: 0,
+      desc: { da: 'To senge og eget bad. Sengetøj medbringes.', en: 'Two beds and a private bathroom. Bring your own bedding.', ar: 'سريران وحمام خاص. أحضر أغطية السرير معك.' },
+      rules: { da: 'Indtjekning fra kl. 14, udtjekning senest kl. 11. Værelset afleveres rengjort.', en: 'Check-in from 14:00, check-out by 11:00. Leave the room clean.', ar: 'الدخول من الساعة 14، والمغادرة حتى الساعة 11. اترك الغرفة نظيفة.' } },
+    { id: 'f3', kind: 'laundry', name: { da: 'Vaskeriet', en: 'laundry', ar: 'المغسلة' }, slot: 'hours', price: 0, deposit: 0, ahead: 14, maxActive: 3, open: ['07:00', '21:00'], maxH: 2,
+      desc: { da: 'To vaskemaskiner og en tørretumbler i kælderen under nr. 14.', en: 'Two washing machines and a tumble dryer in the basement under no. 14.', ar: 'غسالتان ومجفف ملابس في القبو تحت رقم 14.' },
+      rules: { da: 'Tag dit tøj ud, når tiden er gået. Rens fnugfilteret i tørretumbleren.', en: 'Take your laundry out when your time is up. Clean the dryer’s lint filter.', ar: 'أخرج ملابسك عند انتهاء وقتك. نظّف فلتر الوبر في المجفف.' } }
+  ];
+  const FAC_IC = { party: 'users', guest: 'home', laundry: 'drop' };
+  const facName = (f, lang) => f.name[lang || S.lang] || f.name.da;
+  const facOf = id => FAC.find(f => f.id === id);
+  const KINDS = ['raaderet', 'husdyr', 'fremleje', 'hvidevarer', 'opsigelse', 'forslag', 'andet'];
+  const KIND_IC = { raaderet: 'wrench', husdyr: 'home', fremleje: 'key', hvidevarer: 'fridge', opsigelse: 'doc', forslag: 'mega', andet: 'chat' };
+  const FIELDS = {
+    raaderet: [['description', 'f_description', 'ta', 'min10']],
+    husdyr: [['animal', 'f_animal', 'txt'], ['description', 'f_desc2', 'ta', 'opt']],
+    fremleje: [['from', 'f_from', 'date'], ['to', 'f_to', 'date'], ['reason', 'f_reason', 'ta']],
+    hvidevarer: [['appliance', 'f_appliance', 'txt'], ['description', 'f_desc3', 'ta', 'opt']],
+    forslag: [['title', 'f_title', 'txt'], ['text', 'f_text', 'ta', 'min10']],
+    andet: [['subject', 'f_subject', 'txt'], ['text', 'f_text2', 'ta']]
+  };
+  const BOARD = [['Hanne Kjær', 'm_formand', 'formand@engparken.example'], ['Omar Farah', 'm_naest', ''], ['Birgit Lund', 'm_kasserer', ''], ['Peter Nygaard', 'm_medlem', '']];
+  const PHONE_OFFICE = '70 00 00 01', PHONE_VAGT = '70 00 00 00', OFFICE_MAIL = 'drift@engparken.example';
+  const DOCS = [
+    { id: 'd1', cat: 'husorden', t: 'Husorden 2026', d: -120, kb: 184, open: 'regler' },
+    { id: 'd2', cat: 'vedligeholdelse', t: 'Vedligeholdelsesreglement', d: -420, kb: 236, open: 'reglement' },
+    { id: 'd3', cat: 'raaderet', t: 'Råderetskatalog', d: -300, kb: 312 },
+    { id: 'd4', cat: 'referat', t: 'Referat af afdelingsmødet september 2026', d: -52, kb: 142 },
+    { id: 'd5', cat: 'regnskab', t: 'Regnskab 2025', d: -200, kb: 404 },
+    { id: 'd6', cat: 'budget', t: 'Budget 2027', d: -50, kb: 218 },
+    { id: 'd7', cat: 'beboerinfo', t: 'Affaldssortering i Engparken', d: -90, kb: 96 },
+    { id: 'd8', cat: 'kontrakt', t: 'Lejekontrakt', personal: true, open: 'kontrakt', kb: 128 },
+    { id: 'd9', cat: 'kontrakt', t: 'Indflytningsrapport', personal: true, kb: 640, open: 'bolig' }
+  ];
+  const DOC_TEXT = {
+    d3: ['Råderet betyder, at du selv må forbedre og forandre din bolig. Nogle arbejder kræver kun, at du giver besked. Andre skal godkendes, før du går i gang.', 'Eksempler: nyt køkken, nyt badeværelse, opsætning eller nedrivning af ikke-bærende vægge, vaskemaskine på badet.', 'Ansøg under "Blanketter og ansøgninger". Driften svarer normalt inden for 5 hverdage.'],
+    d4: ['Til stede: 46 husstande og afdelingsbestyrelsen.', '1. Hanne Kjær blev valgt som dirigent.', '2. Bestyrelsens beretning blev taget til efterretning.', '3. Forslaget om nye cykelstativer ved nr. 2–8 blev vedtaget.', '4. Budget for 2027 blev godkendt med en huslejestigning på 1,9 %.'],
+    d5: ['Afdelingens regnskab for 2025 viser et lille overskud på 84.000 kr., som overføres til næste år.', 'De største udgifter var renholdelse, vedligeholdelse og forbrug i fællesarealerne.'],
+    d6: ['Budgettet for 2027 giver en gennemsnitlig huslejestigning på 1,9 %.', 'Der er afsat penge til nye vinduer i blok A og til udskiftning af vaskemaskinerne i vaskeriet.'],
+    d7: ['Mad og madaffald i de grønne poser. Plast, metal, glas og papir i de fire beholdere ved hver opgang.', 'Storskrald stilles i storskraldsrummet ved nr. 18 senest søndag aften. Det hentes første mandag i måneden.'],
+    d9: ['Indflytningsrapporten med punkter og billeder ligger under Min bolig.']
+  };
+
+  function mb() {
+    if (S.mb && S.mb.v === 1) return S.mb;
+    const t0 = todayYmd(), now = Date.now();
+    const sat = []; { const d = parseYmd(t0); while (sat.length < 2) { d.setDate(d.getDate() + 1); if (d.getDay() === 6) sat.push(ymd(d)); } }
+    const B = [];
+    const add = (fac, tid, day, a, b) => B.push({ id: 'b' + (B.length + 1), fac, tid, day: a ? null : day, start: a ? atTime(day, a) : atTime(day, '00:00'), end: a ? atTime(day, b) : atTime(addDaysYmd(day, 1), '00:00'), note: '', status: 'booked', created: now - 3 * DAYMS });
+    sat.forEach(d => add('f1', 'x', d));
+    [5, 6, 13].forEach(n => add('f2', 'x', addDaysYmd(t0, n)));
+    const r = rng(hashStr('vaskeri' + t0));
+    for (let n = 0; n < 14; n++) { const day = addDaysYmd(t0, n); [8, 12, 17].forEach(h0 => { if (r() < 0.55) { const h = h0 + Math.floor(r() * 2); add('f3', 'x', day, pad(h) + ':00', pad(h + 2) + ':00'); } }); }
+    TENANT_LOGINS.forEach((tid, i) => add('f2', tid, addDaysYmd(t0, 9 + i * 4)));
+    const A = TENANT_LOGINS.map((tid, i) => ({
+      id: 'a' + (i + 1), tid, kind: 'husdyr', status: 'approved', created: now - (40 + i) * DAYMS, decided: now - (36 + i) * DAYMS, by: 'lise', seen: true,
+      data: { animal: { da: 'Kat', en: 'Cat', ar: 'قطة' }[tenant(tid).lang] || 'Kat', description: { da: 'En indekat på 3 år.', en: 'An indoor cat, 3 years old.', ar: 'قطة منزلية عمرها 3 سنوات.' }[tenant(tid).lang] || 'En indekat på 3 år.' },
+      reply: 'Godkendt. Katten skal være indekat, og den skal være registreret og steriliseret. Husk at give besked, hvis I får flere dyr.',
+      replyT: { en: 'Approved. The cat must be kept indoors and be registered and neutered. Please let us know if you get more animals.', ar: 'تمت الموافقة. يجب أن تبقى القطة داخل المنزل وأن تكون مسجلة ومعقمة. أخبرنا إذا حصلتم على حيوانات أخرى.' }
+    }));
+    // Næste afdelingsmøde: en tirsdag om ca. 5 uger. Demoens besked om mødet får samme dato.
+    let md = addDaysYmd(t0, 33); while (parseYmd(md).getDay() !== 2) md = addDaysYmd(md, 1);
+    // Ikke i juleferien.
+    while ((md.slice(5, 7) === '12' && +md.slice(8) >= 15) || (md.slice(5, 7) === '01' && +md.slice(8) < 7)) md = addDaysYmd(md, 7);
+    const m2 = (S.msgs || []).find(m => m.id === 'M2');
+    if (m2) {
+      const w = l => fmt(l, { weekday: 'long', day: 'numeric', month: 'long' }, 'mbMsg').format(parseYmd(md));
+      m2.subject = 'Afdelingsmøde ' + w('da'); m2.body = 'Afdelingsmødet holdes ' + w('da') + ' kl. 19 i fælleshuset ved nr. 16. Dagsordenen og fristen for forslag står under Min bolig, Beboerdemokrati. Alle beboere er velkomne.';
+      m2.tr = { en: { subject: 'Residents\u2019 meeting on ' + w('en'), body: 'The residents\u2019 meeting is on ' + w('en') + ' at 19:00 in the community house at no. 16. The agenda and the deadline for proposals are under My home, Resident democracy. All residents are welcome.' },
+        ar: { subject: 'اجتماع السكان يوم ' + w('ar'), body: 'يُعقد اجتماع السكان يوم ' + w('ar') + ' الساعة 19 في البيت المشترك عند المبنى رقم 16. جدول الأعمال وآخر موعد للمقترحات في مسكني، ديمقراطية السكان. جميع السكان مرحب بهم.' } };
+    }
+    S.mb = { v: 1, bookings: B, apps: A, meeting: { day: md, at: '19:00', deadline: addDaysYmd(md, -14) }, seq: 100 };
+    save();
+    return S.mb;
+  }
+  const nextId = p => p + (++mb().seq);
+  const me = () => tenant(S.me);
+  const isPrimary = x => !/^husstand|^household/i.test(x.role || '');
+
+  /* Husleje: tolv måneder, de elleve seneste er betalt. */
+  function rentOf(x) {
+    const r = RENT[x.rooms] || RENT[3];
+    const lines = [['l_rent', r.rent], ['l_heat', r.heat], ['l_water', r.water]];
+    const total = r.rent + r.heat + r.water;
+    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + 1);
+    const out = [];
+    for (let i = 0; i < 12; i++) {
+      const due = new Date(d.getFullYear(), d.getMonth() - i, 1);
+      const paid = i > 0 ? new Date(due.getFullYear(), due.getMonth(), 0 - 1) : null;
+      out.push({ period: due.getFullYear() + '-' + pad(due.getMonth() + 1), due: ymd(due), amount: total, status: i === 0 ? (ymd(due) < todayYmd() ? 'over' : 'due') : 'paid', paid: paid ? ymd(paid) : null });
+    }
+    return { lines, total, charges: out, next: out[0], balance: out.filter(c => c.status === 'over').reduce((s, c) => s + c.amount, 0) };
+  }
+  function consOf(x) {
+    const r = RENT[x.rooms] || RENT[3], k = hashStr(x.id);
+    const y = new Date().getFullYear();
+    const rows = [];
+    [y - 1, y - 2].forEach((yy, i) => {
+      const fv = ((k >> (i * 3)) % 9 - 4) / 50, fw = ((k >> (i * 5 + 1)) % 9 - 4) / 40;
+      const av = r.heat * 12, aw = r.water * 12;
+      rows.push({ year: yy, kind: 'varme', aconto: av, actual: Math.round(av * (1 + (i === 0 ? Math.abs(fv) + 0.03 : -Math.abs(fv) - 0.02))), usage: (x.m2 * 0.075 * (1 + fv)).toFixed(1), unit: 'MWh' });
+      rows.push({ year: yy, kind: 'vand', aconto: aw, actual: Math.round(aw * (1 + (i === 0 ? -Math.abs(fw) - 0.04 : Math.abs(fw) + 0.02))), usage: String(Math.round(x.rooms * 13 * (1 + fw))), unit: 'm³' });
+    });
+    return rows;
+  }
+
+  /* ---------- Bookingregler (som serveren) ---------- */
+  const active = (b) => b.status === 'booked';
+  const overlaps = (fac, a, b, skip) => mb().bookings.some(x => x.fac === fac && active(x) && x.id !== skip && x.start < b && x.end > a);
+  const myFuture = (fac) => mb().bookings.filter(x => x.fac === fac && x.tid === S.me && active(x) && x.end > Date.now());
+  function tryBook(f, day, a, b, note) {
+    const t0 = todayYmd();
+    if (day < t0) return mt('e_past');
+    if (day > addDaysYmd(t0, f.ahead)) return mt('e_ahead', f.ahead);
+    let start, end;
+    if (f.slot === 'day') { start = atTime(day, '00:00'); end = atTime(addDaysYmd(day, 1), '00:00'); }
+    else {
+      start = atTime(day, a); end = atTime(day, b);
+      if (start < Date.now()) return mt('e_past');
+      if ((end - start) / H > f.maxH) return mt('e_maxh', f.maxH);
+    }
+    if (myFuture(f.id).length >= f.maxActive) return mt('e_limit', f.maxActive, facName(f));
+    if (overlaps(f.id, start, end)) return mt('e_taken');
+    const bk = { id: nextId('b'), fac: f.id, tid: S.me, day: f.slot === 'day' ? day : null, start, end, note: note || '', status: 'booked', created: Date.now() };
+    mb().bookings.push(bk); save();
+    toast('Ny booking: ' + me().name + ' har booket ' + facName(f, 'da').toLowerCase() + ' ' + bookWhen(bk, 'da') + '.');
+    return bk;
+  }
+  function bookWhen(bk, lang) {
+    lang = lang || S.lang;
+    if (bk.day) return dDate(bk.day, lang);
+    return dDate(new Date(bk.start), lang) + ', ' + (lang === 'da' ? hmOf(bk.start).replace(':', '.') + '–' + hmOf(bk.end).replace(':', '.') : hmOf(bk.start) + '–' + hmOf(bk.end));
+  }
+  const icsEscape = s => String(s).replace(/[\\;,]/g, m => '\\' + m).replace(/\n/g, '\\n');
+  const icsDate = ts => { const d = new Date(ts); return d.getUTCFullYear() + pad(d.getUTCMonth() + 1) + pad(d.getUTCDate()) + 'T' + pad(d.getUTCHours()) + pad(d.getUTCMinutes()) + '00Z'; };
+  function downloadIcs(name, title, place, ev) {
+    const L0 = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Mitboli demo//Min bolig//DA', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'BEGIN:VEVENT', 'UID:' + name + '@mitboli.demo', 'DTSTAMP:' + icsDate(Date.now())];
+    if (ev.day) L0.push('DTSTART;VALUE=DATE:' + ev.day.replace(/-/g, ''), 'DTEND;VALUE=DATE:' + addDaysYmd(ev.day, 1).replace(/-/g, ''));
+    else L0.push('DTSTART:' + icsDate(ev.start), 'DTEND:' + icsDate(ev.end));
+    L0.push('SUMMARY:' + icsEscape(title), 'LOCATION:' + icsEscape(place), 'END:VEVENT', 'END:VCALENDAR');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([L0.join('\r\n') + '\r\n'], { type: 'text/calendar' })); a.download = 'mitboli-' + name + '.ics';
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  }
+
+  /* ---------- Fælles byggeklodser ---------- */
+  const M = () => T.mb || (T.mb = {});
+  const tile = (scr, icn, title, sub) => '<button type="button" class="mb-tile" data-a="mbgo" data-v="' + scr + '"><span class="mb-ti">' + ic(icn) + '</span><span><strong>' + esc(title) + '</strong>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</span></button>';
+  const row = (act, v, icn, title, sub, extra) => '<button type="button" class="tcase" data-a="' + act + '" data-v="' + esc(v || '') + '"><span class="cic">' + ic(icn) + '</span><span><strong dir="auto">' + esc(title) + '</strong>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</span>' + (extra || ic('chev', 'chev flip')) + '</button>';
+  const stChip = s => '<span class="mb-st mb-st-' + s + '">' + esc(mt('s_' + s)) + '</span>';
+  const errBox = () => M().err ? '<p class="err" role="alert">' + esc(M().err) + '</p>' : '';
+  const okBox = () => M().ok ? '<p class="mb-ok" role="status">' + ic('check') + '<span>' + esc(M().ok) + '</span></p>' : '';
+  const qa = (q, a) => '<details class="rule mb-qa"><summary>' + esc(q) + '</summary><p>' + esc(a) + '</p></details>';
+  const kr = n => krL(n);
+  const myApps = () => mb().apps.filter(a => a.tid === S.me).sort((a, b) => b.created - a.created);
+  const replyOf = a => (S.lang !== 'da' && a.replyT && a.replyT[S.lang]) || a.reply;
+  const openOps = () => mb().apps.find(a => a.tid === S.me && a.kind === 'opsigelse' && (a.status === 'received' || a.status === 'approved'));
+
+  /* ---------- Skærme ---------- */
+  const PARENT = { mbokonomi: 'bolig', mbbooking: 'bolig', mbfac: 'mbbooking', mbdocs: 'bolig', mbdoc: 'mbdocs', mbself: 'bolig', mbform: 'mbself', mbops: 'mbself', mbdemo: 'bolig', mbkontakt: 'bolig' };
+  const TOP = ['mbokonomi', 'mbbooking', 'mbdocs', 'mbself', 'mbdemo', 'mbkontakt'];
+  const parentOf = scr => (TOP.includes(scr) && M().from === 'home') ? 'home' : (scr === 'mbform' && M().formFrom) ? M().formFrom : (PARENT[scr] || 'home');
+  window.__mbBackFor = scr => PARENT[scr] ? parentOf(scr) : null;
+
+  SCREENS.mbokonomi = function () {
+    const x = me(), R = rentOf(x), C = consOf(x), n = R.next;
+    let h = bar(mt('okonomi'), 'mbback') + '<div class="app-body ap">';
+    h += '<section class="mb-card mb-next"><span class="eyebrow">' + esc(mt('next_charge')) + '</span><strong class="mb-big">' + esc(kr(n.amount)) + '</strong><p class="muted">' + esc(mt('due', dDate(n.due))) + ' ' + stChip2(n.status) + '</p></section>';
+    h += '<section class="mb-card"><div class="mb-row"><span>' + esc(mt('balance')) + '</span><strong>' + esc(kr(R.balance)) + '</strong></div><p class="fine">' + esc(R.balance ? '' : mt('bal0')) + '</p></section>';
+    const cols = ['var(--brand)', 'var(--hoej)', 'var(--normal)'];
+    h += '<section class="mb-card"><h3 class="mb-h">' + esc(mt('compose')) + '</h3><div class="mb-bar" aria-hidden="true">' + R.lines.map((l, i) => '<span style="width:' + (l[1] / R.total * 100).toFixed(1) + '%;background:' + cols[i] + '"></span>').join('') + '</div>'
+      + '<ul class="mb-lines">' + R.lines.map((l, i) => '<li><span><i style="background:' + cols[i] + '"></i>' + esc(mt(l[0])) + '</span><span>' + esc(kr(l[1])) + '</span></li>').join('') + '<li class="tot"><span>' + esc(mt('l_total')) + '</span><span>' + esc(kr(R.total)) + '</span></li></ul>'
+      + qa(mt('q_aconto'), mt('a_aconto')) + '</section>';
+    h += '<h3 class="app-h3">' + esc(mt('charges')) + '</h3><div class="mb-list">' + R.charges.map(c => '<div class="mb-li"><span><strong>' + esc(monthName(+c.period.slice(0, 4), +c.period.slice(5) - 1)) + '</strong><small>' + esc(c.paid ? mt('paid_on', dDate(c.paid)) : mt('due', dDate(c.due))) + '</small></span><span class="mb-amt">' + esc(kr(c.amount)) + stChip2(c.status) + '</span></div>').join('') + '</div>';
+    h += '<h3 class="app-h3">' + esc(mt('cons')) + '</h3>';
+    [...new Set(C.map(c => c.year))].forEach(y => {
+      h += '<section class="mb-card"><h3 class="mb-h">' + y + '</h3>' + C.filter(c => c.year === y).map(c => {
+        const diff = c.actual - c.aconto, mx = Math.max(c.actual, c.aconto);
+        return '<div class="mb-cons"><div class="mb-row"><strong>' + esc(mt('k_' + c.kind)) + '</strong><span class="' + (diff > 0 ? 'mb-neg' : 'mb-pos') + '">' + esc((diff > 0 ? mt('after') : mt('back')) + ' ' + kr(Math.abs(diff))) + '</span></div>'
+          + '<div class="mb-bars"><span>' + esc(mt('aconto')) + '</span><i style="width:' + (c.aconto / mx * 100).toFixed(0) + '%"></i><b>' + esc(kr(c.aconto)) + '</b><span>' + esc(mt('actual')) + '</span><i class="act" style="width:' + (c.actual / mx * 100).toFixed(0) + '%"></i><b>' + esc(kr(c.actual)) + '</b></div>'
+          + '<p class="fine">' + esc(mt('usage')) + ': ' + esc(c.usage + ' ' + c.unit) + '</p></div>';
+      }).join('') + '</section>';
+    });
+    h += qa(mt('q_cons'), mt('a_cons')) + '<p class="fine">' + esc(mt('pay_note')) + '</p></div>';
+    return h;
+  };
+  function stChip2(s) { return '<span class="mb-st mb-st-' + (s === 'paid' ? 'approved' : s === 'over' ? 'rejected' : 'received') + '">' + esc(mt('st_' + s)) + '</span>'; }
+
+  SCREENS.mbbooking = function () {
+    const mine = mb().bookings.filter(b => b.tid === S.me && active(b)).sort((a, b) => a.start - b.start);
+    const up = mine.filter(b => b.end > Date.now()), past = mine.filter(b => b.end <= Date.now()).slice(-3).reverse();
+    let h = bar(mt('booking'), 'mbback') + '<div class="app-body ap">' + okBox();
+    if (M().receipt) {
+      const b = mb().bookings.find(x => x.id === M().receipt), f = b && facOf(b.fac);
+      if (b && f) h += '<section class="mb-card mb-receipt">' + ic('check') + '<div><strong>' + esc(mt('booked_h', facName(f))) + '</strong><p>' + esc(bookWhen(b)) + (f.price ? ' · ' + esc(kr(f.price)) : '') + (f.deposit ? ' + ' + esc(mt('deposit').toLowerCase()) + ' ' + esc(kr(f.deposit)) : '') + '</p><p class="fine">' + esc(mt('key_note')) + '</p><button type="button" class="btn btn-secondary btn-sm" data-a="mbics" data-id="' + b.id + '">' + ic('cal') + esc(mt('add_cal')) + '</button></div></section>';
+    }
+    h += '<h3 class="app-h3">' + esc(mt('my_b')) + '</h3>';
+    h += up.length ? up.map(bookRow).join('') : '<p class="empty-t">' + esc(mt('no_b')) + '</p>';
+    h += '<h3 class="app-h3">' + esc(mt('facs')) + '</h3>';
+    h += FAC.map(f => '<section class="mb-card mb-fac"><div class="mb-fh"><span class="mb-ti">' + ic(FAC_IC[f.kind]) + '</span><div><strong>' + esc(cap(facName(f))) + '</strong><small>' + esc(f.desc[S.lang] || f.desc.da) + '</small></div></div>'
+      + '<dl class="mb-dl"><div><dt>' + esc(mt('price')) + '</dt><dd>' + esc(f.price ? kr(f.price) + ' ' + mt('per_day') : mt('free')) + '</dd></div><div><dt>' + esc(mt('deposit')) + '</dt><dd>' + esc(f.deposit ? kr(f.deposit) : mt('free')) + '</dd></div>'
+      + (f.slot === 'hours' ? '<div><dt>' + esc(mt('rules')) + '</dt><dd>' + esc(mt('open_h', tme(f.open[0]), tme(f.open[1])) + ', ' + mt('max_h', f.maxH)) + '</dd></div>' : '') + '</dl>'
+      + '<details class="rule"><summary>' + esc(mt('rules')) + '</summary><p>' + esc(f.rules[S.lang] || f.rules.da) + '</p></details>'
+      + '<button type="button" class="btn btn-primary block" data-a="mbfac" data-v="' + f.id + '">' + ic('cal') + esc(mt('choose_time')) + '</button></section>').join('');
+    if (past.length) h += '<h3 class="app-h3">' + esc(mt('past_b')) + '</h3>' + past.map(b => bookRow(b, true)).join('');
+    return h + '</div>';
+  };
+  const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+  function bookRow(b, past) {
+    const f = facOf(b.fac);
+    let h = '<div class="mb-li mb-bk"><span class="cic">' + ic(FAC_IC[f.kind]) + '</span><span><strong>' + esc(cap(facName(f))) + '</strong><small>' + esc(bookWhen(b)) + '</small></span>';
+    if (!past) h += '<span class="mb-acts"><button type="button" class="icon-btn" data-a="mbics" data-id="' + b.id + '" aria-label="' + esc(mt('add_cal')) + '">' + ic('cal') + '</button>'
+      + (b.start > Date.now() ? '<button type="button" class="icon-btn" data-a="mbcancel" data-id="' + b.id + '" aria-label="' + esc(mt('cancel')) + '">' + ic('x') + '</button>' : '') + '</span>';
+    h += '</div>';
+    if (M().cancel === b.id) h += '<div class="mb-confirm" role="alertdialog"><p>' + esc(mt('cancel_q')) + '</p><div class="mb-btns"><button type="button" class="btn btn-secondary" data-a="mbcancelno">' + esc(mt('keep')) + '</button><button type="button" class="btn btn-danger" data-a="mbcancelok" data-id="' + b.id + '">' + esc(mt('yes_cancel')) + '</button></div></div>';
+    return h;
+  }
+
+  SCREENS.mbfac = function () {
+    const m = M(), f = facOf(m.fac) || FAC[0], t0 = todayYmd(), last = addDaysYmd(t0, f.ahead);
+    const base = parseYmd(t0); base.setDate(1); base.setMonth(base.getMonth() + (m.mo || 0));
+    const y = base.getFullYear(), mo = base.getMonth();
+    const first = new Date(y, mo, 1), startDow = (first.getDay() + 6) % 7, dim = new Date(y, mo + 1, 0).getDate();
+    const dayState = day => {
+      if (day < t0 || day > last) return 'off';
+      const a = atTime(day, '00:00'), b = atTime(addDaysYmd(day, 1), '00:00');
+      const bs = mb().bookings.filter(x => x.fac === f.id && active(x) && x.start < b && x.end > a);
+      if (f.slot === 'day') return bs.some(x => x.tid === S.me) ? 'mine' : bs.length ? 'busy' : 'free';
+      return 'free';
+    };
+    const wd = Array.from({ length: 7 }, (_, i) => fmt(S.lang, { weekday: 'narrow' }, 'mbW').format(new Date(2024, 0, 1 + i)));
+    let h = bar(cap(facName(f)), 'mbback') + '<div class="app-body ap">';
+    h += '<section class="mb-card"><div class="mb-calh"><button type="button" class="icon-btn" data-a="mbmonth" data-v="-1"' + ((m.mo || 0) <= 0 ? ' disabled' : '') + ' aria-label="‹">' + ic('back', 'flip') + '</button><strong>' + esc(monthName(y, mo)) + '</strong><button type="button" class="icon-btn" data-a="mbmonth" data-v="1"' + (ymd(new Date(y, mo + 1, 1)) > last ? ' disabled' : '') + ' aria-label="›">' + ic('chev', 'flip') + '</button></div>'
+      + '<div class="mb-cal" role="grid">' + wd.map(w => '<span class="mb-wd">' + esc(w) + '</span>').join('') + Array.from({ length: startDow }, () => '<span></span>').join('');
+    for (let d = 1; d <= dim; d++) {
+      const day = ymd(new Date(y, mo, d)), st = dayState(day), sel = m.day === day;
+      h += '<button type="button" class="mb-d mb-d-' + st + (sel ? ' sel' : '') + (day === t0 ? ' today' : '') + '" data-a="mbday" data-v="' + day + '"' + (st === 'off' || st === 'busy' || st === 'mine' ? ' disabled' : '') + ' aria-pressed="' + sel + '" aria-label="' + esc(dFull(day) + (st === 'busy' ? ' · ' + mt('busy') : st === 'mine' ? ' · ' + mt('yours') : '')) + '">' + d + '</button>';
+    }
+    h += '</div>' + (f.slot === 'day' ? '<p class="mb-legend"><span class="mb-d mb-d-busy">7</span>' + esc(mt('busy')) + '<span class="mb-d mb-d-mine">7</span>' + esc(mt('yours')) + '</p>' : '') + '</section>';
+    if (m.day && f.slot === 'hours') {
+      const slots = []; for (let t = atTime(m.day, f.open[0]); t < atTime(m.day, f.open[1]); t += 30 * MIN) slots.push(t);
+      const busyAt = t => overlaps(f.id, t, t + 30 * MIN);
+      const a = m.a, b = m.b;
+      h += '<section class="mb-card"><h3 class="mb-h">' + esc(mt('pick_time')) + ' · ' + esc(dDate(m.day)) + '</h3><p class="fine">' + esc(mt('pick_time_s', f.maxH)) + '</p><div class="mb-slots">'
+        + slots.map(t => { const bz = busyAt(t) || t < Date.now(), inSel = a != null && t >= a && t <= (b != null ? b : a); return '<button type="button" class="mb-slot' + (bz ? ' busy' : '') + (inSel ? ' sel' : '') + '" data-a="mbslot" data-v="' + t + '"' + (bz ? ' disabled' : '') + '>' + esc(tme(hmOf(t))) + '</button>'; }).join('') + '</div></section>';
+    }
+    const ready = m.day && (f.slot === 'day' || m.a != null);
+    if (ready) {
+      const when = f.slot === 'day' ? dFull(m.day) : dDate(m.day) + ', ' + tme(hmOf(m.a)) + '–' + tme(hmOf((m.b != null ? m.b : m.a) + 30 * MIN));
+      h += '<section class="mb-card mb-confirmcard" id="mbConfirm"><h3 class="mb-h">' + esc(mt('confirm_h')) + '</h3><p><strong>' + esc(cap(facName(f))) + '</strong><br>' + esc(when) + '</p>'
+        + '<dl class="mb-dl"><div><dt>' + esc(mt('price')) + '</dt><dd>' + esc(f.price ? kr(f.price) : mt('free')) + '</dd></div><div><dt>' + esc(mt('deposit')) + '</dt><dd>' + esc(f.deposit ? kr(f.deposit) : mt('free')) + '</dd></div></dl>'
+        + '<p class="mb-rules">' + esc(f.rules[S.lang] || f.rules.da) + '</p>'
+        + '<label class="mb-check"><input type="checkbox" data-mbk="rulesOk"' + (m.rulesOk ? ' checked' : '') + '><span>' + esc(mt('read_rules')) + '</span></label>'
+        + '<label class="field-l" for="mbNote">' + esc(mt('note')) + '</label><input id="mbNote" class="txt" type="text" maxlength="200" dir="auto" data-mbn="1" value="' + esc(m.note || '') + '">'
+        + errBox() + '<button type="button" class="btn btn-primary block" data-a="mbbook">' + esc(mt('do_book')) + '</button></section>';
+    } else h += errBox();
+    return h + '</div>';
+  };
+
+  SCREENS.mbdocs = function () {
+    const m = M(), q = (m.q || '').trim().toLowerCase(), cat = m.cat || 'all';
+    const cats = ['all', ...new Set(DOCS.map(d => d.cat))];
+    let h = bar(mt('docs'), 'mbback') + '<div class="app-body ap">';
+    h += '<label class="sr" for="mbQ">' + esc(mt('search')) + '</label><div class="mb-search">' + ic('search') + '<input id="mbQ" type="search" class="txt" placeholder="' + esc(mt('search')) + '" value="' + esc(m.q || '') + '" data-mbq="1" autocomplete="off"></div>';
+    h += '<div class="loc-row mb-cats">' + cats.map(c => '<button type="button" class="lchip" data-a="mbcat" data-v="' + c + '" aria-pressed="' + (cat === c) + '">' + esc(c === 'all' ? mt('all') : mt('c_' + c)) + '</button>').join('') + '</div>';
+    return h + '<div id="mbDocList">' + docList(q, cat) + '</div></div>';
+  };
+  function docList(q, cat) {
+    const list = DOCS.filter(d => (cat === 'all' || d.cat === cat) && (!q || d.t.toLowerCase().includes(q) || mt('c_' + d.cat).toLowerCase().includes(q)));
+    if (!list.length) return '<p class="empty-t">' + esc(mt('no_docs')) + '</p>';
+    return list.map(d => {
+      const date = d.personal ? (d.cat === 'kontrakt' && d.id === 'd8' ? me().moveIn : me().moveIn) : addDaysYmd(todayYmd(), d.d);
+      return '<button type="button" class="tcase mb-doc" data-a="mbdoc" data-v="' + d.id + '"><span class="cic">' + ic('doc') + '</span><span><strong lang="da" dir="ltr">' + esc(d.t) + '</strong><small>' + esc(mt('c_' + d.cat)) + ' · ' + esc(dDate(date)) + ' · ' + d.kb + ' kB' + (d.personal ? ' · ' : '') + '</small>' + (d.personal ? '<span class="mb-st mb-st-received">' + esc(mt('only_you')) + '</span>' : '') + '</span>' + ic('chev', 'chev flip') + '</button>';
+    }).join('');
+  }
+  SCREENS.mbdoc = function () {
+    const d = DOCS.find(x => x.id === M().doc) || DOCS[2];
+    const paras = DOC_TEXT[d.id] || [];
+    return bar(mt('docs'), 'mbback') + '<div class="app-body ap"><article class="contract"><p class="c-kick">' + esc(mt('c_' + d.cat)) + '</p><h3 lang="da" dir="ltr">' + esc(d.t) + '</h3>'
+      + (S.lang !== 'da' ? '<p class="fine">' + esc(mt('only_da')) + '</p>' : '')
+      + '<div lang="da" dir="ltr">' + paras.map(p => '<p class="mb-p">' + esc(p) + '</p>').join('') + '</div><p class="fine">' + esc(mt('demo_doc')) + '</p></article></div>';
+  };
+
+  SCREENS.mbself = function () {
+    const apps = myApps();
+    let h = bar(mt('self'), 'mbback') + '<div class="app-body ap">' + okBox() + '<p class="muted">' + esc(mt('self_intro')) + '</p><div class="mb-grid">';
+    h += KINDS.map(k => '<button type="button" class="mb-kind" data-a="mbkind" data-v="' + k + '"><span class="mb-ti">' + ic(KIND_IC[k]) + '</span><strong>' + esc(mt('k_' + k)) + '</strong><small>' + esc(mt('d_' + k)) + '</small><span class="mb-fill">' + esc(mt('fill')) + ic('chev', 'flip') + '</span></button>').join('') + '</div>';
+    h += '<h3 class="app-h3" id="mbMine">' + esc(mt('mine')) + '</h3>';
+    h += apps.length ? apps.map(appCard).join('') : '<p class="empty-t">' + esc(mt('no_apps')) + '</p>';
+    if (apps.some(a => a.status === 'received')) h += '<p class="fine mb-hint">' + esc(mt('demo_hint')) + '</p>';
+    return h + '</div>';
+  };
+  function appSummary(a, lang) {
+    const d = a.data || {}, L0 = lang || S.lang;
+    if (a.kind === 'opsigelse') return (L0 === S.lang ? mt('a_move', dDate(d.moveOutDate)) : da('a_move', dDate(d.moveOutDate, 'da')));
+    if (a.kind === 'fremleje') return dDate(d.from, L0) + ' – ' + dDate(d.to, L0);
+    return d.animal || d.appliance || d.title || d.subject || short(d.description || d.text || '', 60);
+  }
+  function appCard(a) {
+    let h = '<article class="mb-card mb-app"><div class="mb-row"><strong>' + esc(mt('k_' + a.kind)) + '</strong>' + stChip(a.status) + '</div><p class="muted" dir="auto">' + esc(appSummary(a)) + '</p>'
+      + '<ol class="mb-tl"><li class="done">' + esc(mt('sent_on', dDate(new Date(a.created)))) + '</li><li class="' + (a.decided ? 'done' : '') + '">' + esc(a.decided ? mt('decided_on', dDate(new Date(a.decided))) : mt('s_received') + ' …') + '</li></ol>';
+    if (a.reply) { const tr = S.lang === 'da' || (a.replyT && a.replyT[S.lang]); h += '<blockquote class="mb-reply"><span class="eyebrow">' + esc(mt('reply')) + '</span><p dir="auto"' + (tr ? '' : ' lang="da"') + '>' + esc(replyOf(a)) + '</p>' + (tr ? '' : '<small class="fine">' + esc(mt('only_da_r')) + '</small>') + '</blockquote>'; }
+    if (a.status === 'received') {
+      h += M().wd === a.id
+        ? '<div class="mb-confirm" role="alertdialog"><p>' + esc(mt('wd_q')) + '</p><div class="mb-btns"><button type="button" class="btn btn-secondary" data-a="mbwdno">' + esc(mt('keep')) + '</button><button type="button" class="btn btn-danger" data-a="mbwdok" data-id="' + a.id + '">' + esc(mt('yes_wd')) + '</button></div></div>'
+        : '<button type="button" class="link" data-a="mbwd" data-id="' + a.id + '">' + esc(mt('withdraw')) + '</button>';
+    }
+    return h + '</article>';
+  }
+
+  SCREENS.mbform = function () {
+    const m = M(), k = m.kind || 'andet', F = m.form || (m.form = {});
+    let h = bar(mt('k_' + k), 'mbback') + '<div class="app-body ap"><p class="muted">' + esc(mt('d_' + k)) + '</p>';
+    if (k === 'forslag') { const dl = mb().meeting.deadline; if (dl < todayYmd()) return h + '<p class="mb-warn">' + esc(mt('dead_passed')) + '</p></div>'; h += '<p class="mb-note">' + esc(mt('deadline', dDate(dl))) + '</p>'; }
+    h += FIELDS[k].map(fd => {
+      const id = 'mbf_' + fd[0], lab = mt(fd[1]) + (fd[3] === 'opt' ? ' (' + mt('optional') + ')' : '');
+      const v = esc(F[fd[0]] || '');
+      return '<label class="field-l" for="' + id + '">' + esc(lab) + '</label>' + (fd[2] === 'ta'
+        ? '<textarea id="' + id + '" rows="4" dir="auto" maxlength="2000" data-mbf="' + fd[0] + '">' + v + '</textarea>'
+        : '<input id="' + id + '" class="txt" type="' + (fd[2] === 'date' ? 'date' : 'text') + '" dir="auto" maxlength="200" data-mbf="' + fd[0] + '" value="' + v + '"' + (fd[2] === 'date' ? ' min="' + todayYmd() + '"' : '') + '>');
+    }).join('');
+    return h + errBox() + '<button type="button" class="btn btn-primary block" data-a="mbsend">' + ic('send') + esc(mt('send_app')) + '</button></div>';
+  };
+
+  SCREENS.mbops = function () {
+    const m = M(), x = me(), o = m.ops || (m.ops = { step: 1, date: null, c: { email: x.email || '' } });
+    let h = bar(mt('k_opsigelse'), 'mbback') + '<div class="app-body ap">';
+    if (!isPrimary(x)) return h + '<p class="mb-warn">' + esc(mt('not_primary')) + '</p></div>';
+    const ex = openOps();
+    if (ex && o.step !== 4) return h + '<p class="mb-warn">' + esc(mt('e_exists')) + '</p>' + appCard(ex) + '</div>';
+    if (o.step === 4) return h + '<section class="mb-card mb-receipt">' + ic('check') + '<div><strong>' + esc(mt('ops_done')) + '</strong><p>' + esc(mt('a_move', dFull(o.date))) + '</p><p class="fine">' + esc(mt('ops_done_s')) + '</p><button type="button" class="btn btn-secondary btn-sm" data-a="mbgo" data-v="mbself">' + esc(mt('mine')) + '</button></div></section></div>';
+    h += '<p class="eyebrow">' + esc(mt('step', o.step)) + '</p>';
+    if (o.step === 1) {
+      h += '<p class="mb-note">' + esc(NOTICE[S.lang] || NOTICE.da) + '</p><fieldset class="mb-radios"><legend class="field-l">' + esc(mt('choose_date')) + '</legend>'
+        + moveOutOptions(6).map(dd => '<label class="mb-radio"><input type="radio" name="mbops" value="' + dd + '" data-mbd="1"' + (o.date === dd ? ' checked' : '') + '><span>' + esc(dFull(dd)) + '</span></label>').join('') + '</fieldset>'
+        + '<ul class="mb-bul"><li>' + esc(mt('ops_pay')) + '</li><li>' + esc(mt('ops_syn')) + '</li></ul>';
+    } else if (o.step === 2) {
+      h += '<h3 class="mb-h">' + esc(mt('ops_contact')) + '</h3>' + [['newAddress', 'f_newaddr', 'text'], ['email', 'f_email', 'email'], ['phone', 'f_phone', 'tel']].map(fd => '<label class="field-l" for="mbc_' + fd[0] + '">' + esc(mt(fd[1])) + ' (' + esc(mt('optional')) + ')</label><input id="mbc_' + fd[0] + '" class="txt" type="' + fd[2] + '" dir="auto" maxlength="200" data-mbc="' + fd[0] + '" value="' + esc(o.c[fd[0]] || '') + '">').join('');
+    } else {
+      h += '<section class="mb-card"><h3 class="mb-h">' + esc(mt('sure')) + '</h3><p>' + esc(mt('ops_sum', x.addr, dFull(o.date))) + '</p><dl class="mb-dl">'
+        + [['f_newaddr', o.c.newAddress], ['f_email', o.c.email], ['f_phone', o.c.phone]].filter(r => r[1]).map(r => '<div><dt>' + esc(mt(r[0])) + '</dt><dd dir="auto">' + esc(r[1]) + '</dd></div>').join('') + '</dl><ul class="mb-bul"><li>' + esc(mt('ops_pay')) + '</li><li>' + esc(mt('ops_syn')) + '</li></ul></section>';
+    }
+    h += errBox() + '<div class="mb-btns">' + (o.step > 1 ? '<button type="button" class="btn btn-secondary" data-a="mbopsprev">' + esc(mt('prev')) + '</button>' : '')
+      + '<button type="button" class="btn ' + (o.step === 3 ? 'btn-danger' : 'btn-primary') + '" data-a="mbopsnext">' + esc(o.step === 3 ? mt('ops_send') : mt('next')) + '</button></div>';
+    return h + '</div>';
+  };
+
+  SCREENS.mbdemo = function () {
+    const mt0 = mb().meeting, left = daysUntil(mt0.deadline);
+    let h = bar(mt('demo'), 'mbback') + '<div class="app-body ap"><p class="mb-note">' + esc(mt('demo_intro')) + '</p>';
+    h += '<section class="mb-card"><span class="eyebrow">' + esc(mt('meet_h')) + '</span><h3 class="mb-big2">' + esc(dFull(mt0.day)) + ', ' + esc(tme(mt0.at)) + '</h3><p class="muted">' + ic('pin') + ' ' + esc(mt('place_v')) + '</p>'
+      + '<h4 class="mb-h">' + esc(mt('agenda')) + '</h4><ol class="mb-agenda">' + mt('ag').map(a => '<li>' + esc(a) + '</li>').join('') + '</ol>'
+      + '<p class="' + (left < 0 ? 'mb-warn' : 'mb-note') + '">' + esc(left < 0 ? mt('dead_passed') : mt('deadline', dDate(mt0.deadline)) + ' (' + mt('in_days', left) + ')') + '</p>'
+      + '<div class="mb-btns"><button type="button" class="btn btn-primary" data-a="mbkind" data-v="forslag" data-from="mbdemo"' + (left < 0 ? ' disabled' : '') + '>' + ic('mega') + esc(mt('send_prop')) + '</button><button type="button" class="btn btn-secondary" data-a="mbicsm">' + ic('cal') + esc(mt('add_cal_m')) + '</button></div></section>';
+    h += '<h3 class="app-h3">' + esc(mt('board_h')) + '</h3><div class="mb-list">' + BOARD.map(b => '<div class="mb-li"><span class="av">' + esc(initials(b[0])) + '</span><span><strong>' + esc(b[0]) + '</strong><small>' + esc(mt(b[1])) + (b[2] ? ' · ' + esc(b[2]) : '') + '</small></span></div>').join('') + '</div>';
+    h += '<div class="h3-row"><h3 class="app-h3">' + esc(mt('minutes_h')) + '</h3><button type="button" class="link" data-a="mbgo" data-v="mbdocs">' + esc(mt('all_docs')) + '</button></div>';
+    h += DOCS.filter(d => ['referat', 'regnskab', 'budget'].includes(d.cat)).map(d => row('mbdoc', d.id, 'doc', d.t, mt('c_' + d.cat))).join('');
+    return h + '</div>';
+  };
+
+  SCREENS.mbkontakt = function () {
+    const x = me(), ct = staffById(synOwner(x)), open = officeOpen();
+    let h = bar(mt('kontakt'), 'mbback') + '<div class="app-body ap">';
+    h += '<section class="mb-card mb-akut"><strong>' + ic('alert') + esc(mt('akut_h')) + '</strong><p>' + esc(mt('akut_ex')) + '</p><button type="button" class="btn btn-danger block" data-a="mbcall">' + ic('phone') + esc(mt('call', LTR(PHONE_VAGT))) + '</button><p class="fine">' + esc(mt('call112')) + '</p><p class="fine mb-callnote" id="mbCallNote" hidden>' + esc(mt('demo_call')) + '</p></section>';
+    h += '<section class="mb-card"><div class="mb-row"><h3 class="mb-h">' + esc(mt('office_h')) + '</h3><span class="mb-st mb-st-' + (open ? 'approved' : 'withdrawn') + '">' + esc(open ? mt('open_now') : mt('closed_now')) + '</span></div>'
+      + '<dl class="mb-dl"><div><dt>' + ic('phone') + '</dt><dd><button type="button" class="link" data-a="mbcall">' + esc(LTR(PHONE_OFFICE)) + '</button></dd></div><div><dt>' + ic('clock') + '</dt><dd>' + esc(mt('hours')) + '</dd></div><div><dt>' + ic('mail') + '</dt><dd dir="ltr">' + esc(OFFICE_MAIL) + '</dd></div></dl></section>';
+    if (ct) h += '<section class="mb-card"><h3 class="mb-h">' + esc(mt('caretaker_h')) + '</h3><div class="mb-li"><span class="av">' + esc(initials(ct.name)) + '</span><span><strong>' + esc(ct.name) + '</strong><small lang="da" dir="ltr">' + esc(ct.area || '') + '</small></span></div></section>';
+    h += '<div class="mb-btns"><button type="button" class="btn btn-primary" data-a="new">' + ic('camera') + esc(mt('report')) + '</button><button type="button" class="btn btn-secondary" data-a="mbkind" data-v="andet" data-from="mbkontakt">' + ic('chat') + esc(mt('write')) + '</button></div>';
+    return h + '</div>';
+  };
+
+  /* Min bolig: genveje øverst. */
+  const _bolig = SCREENS.bolig;
+  SCREENS.bolig = function () {
+    const html = _bolig();
+    const hub = '<h3 class="app-h3">' + esc(mt('hub_h')) + '</h3><div class="mb-tiles">'
+      + tile('mbokonomi', 'list', mt('okonomi'), mt('okonomi_s')) + tile('mbbooking', 'cal', mt('booking'), mt('booking_s')) + tile('mbdocs', 'doc', mt('docs'), mt('docs_s'))
+      + tile('mbself', 'send', mt('self'), mt('self_s')) + tile('mbdemo', 'users', mt('demo'), mt('demo_s')) + tile('mbkontakt', 'phone', mt('kontakt'), mt('kontakt_s')) + '</div>';
+    const i = html.indexOf('<dl class="facts">');
+    return i > 0 ? html.slice(0, i) + hub + html.slice(i) : html;
+  };
+
+  /* Forsiden: "Lige nu" og genveje. */
+  function attention() {
+    const out = [], x = me(), R = rentOf(x), t0 = todayYmd();
+    const ops = openOps(); if (ops) out.push(row('mbgo', 'mbself', 'doc', mt('a_move', dDate(ops.data.moveOutDate)), mt('s_' + ops.status)));
+    const seen = new Set(mb().apps.filter(a => a.seen).map(a => a.id));
+    myApps().filter(a => a.decided && !seen.has(a.id)).forEach(a => out.push(row('mbgo', 'mbself', 'chat', mt('a_app', mt('k_' + a.kind)), mt('s_' + a.status), '<b class="chip new">' + esc(t('msg_new')) + '</b>')));
+    out.push(row('mbgo', 'mbokonomi', 'list', mt('a_rent', kr(R.next.amount)), mt('a_rent_s', dDate(R.next.due))));
+    mb().bookings.filter(b => b.tid === S.me && active(b) && b.end > Date.now() && b.start < Date.now() + 14 * DAYMS).sort((a, b) => a.start - b.start).slice(0, 2)
+      .forEach(b => out.push(row('mbgo', 'mbbooking', 'cal', mt('a_book', cap(facName(facOf(b.fac)))), bookWhen(b))));
+    const left = daysUntil(mb().meeting.deadline); if (left >= 0 && left <= 14) out.push(row('mbgo', 'mbdemo', 'mega', mt('a_dead'), dDate(mb().meeting.deadline) + ' · ' + mt('in_days', left)));
+    return out;
+  }
+  const _home = SCREENS.home;
+  SCREENS.home = function () {
+    const html = _home();
+    const block = '<div class="mb-quick">' + [['mbbooking', 'cal', 'q_book'], ['mbokonomi', 'list', 'q_rent'], ['mbself', 'send', 'q_self'], ['mbkontakt', 'phone', 'q_contact']]
+      .map(q => '<button type="button" class="mb-q" data-a="mbgo" data-v="' + q[0] + '" data-from="home">' + ic(q[1]) + '<span>' + esc(mt(q[2])) + '</span></button>').join('') + '</div>'
+      + '<h3 class="app-h3">' + esc(mt('now_h')) + '</h3>' + attention().join('');
+    const i = html.indexOf('<h3 class="app-h3">');
+    return i > 0 ? html.slice(0, i) + block + html.slice(i) : html;
+  };
+
+  /* ---------- Navigation ---------- */
+  const _renderNav = renderNav;
+  renderNav = function () {
+    _renderNav.apply(this, arguments);
+    if (!PARENT[T.scr]) return;
+    const n = $('#appnav'); if (!n) return;
+    n.querySelectorAll('[aria-current]').forEach(b => b.removeAttribute('aria-current'));
+    const b = n.querySelector('[data-v="bolig"]'); if (b) b.setAttribute('aria-current', 'true');
+  };
+  const INPUT_SCR = ['mbform', 'mbops', 'mbfac', 'mbdocs'];
+  const _refreshApp = refreshApp;
+  refreshApp = function () { if (INPUT_SCR.includes(T.scr)) { renderNav(); return; } _refreshApp.apply(this, arguments); };
+  const _tenantAct = tenantAct;
+  tenantAct = function (a, b) {
+    if (a === 'nav' && PARENT[b.dataset.v]) { goMb(b.dataset.v, 'bolig'); return; }
+    if (a === 'nav' && b.dataset.v === 'bolig') { T.mb = {}; }
+    return _tenantAct.apply(this, arguments);
+  };
+  function goMb(scr, from) {
+    const keep = T.mb || {};
+    if (TOP.includes(scr)) T.mb = { from: from || keep.from || 'bolig' };
+    else T.mb = Object.assign({}, keep, { err: '', ok: '' });
+    go(scr);
+  }
+  /* Beboerens notifikationer: svar på ansøgninger. */
+  const _tNotifs = tNotifs;
+  tNotifs = function () {
+    const out = _tNotifs.apply(this, arguments);
+    if (!S.me) return out;
+    myApps().filter(a => a.decided).forEach(a => out.push({ t: a.decided, text: short(replyOf(a), 110), title: mt('a_app', mt('k_' + a.kind)), screen: 'mbself', ic: 'chat' }));
+    return out.sort((a, b) => b.t - a.t).slice(0, 30);
+  };
+
+  /* ---------- Handlinger (beboer) ---------- */
+  function rerender() { renderApp(true); }
+  Object.assign(V9_ACTS, {
+    mbgo: b => { const v = b.dataset.v; if (v === 'mbself') mb().apps.forEach(a => { if (a.tid === S.me && a.decided) a.seen = true; }); if (v === 'mbself') save(); goMb(v, b.dataset.from || (T.scr === 'home' ? 'home' : 'bolig')); },
+    mbback: () => { const p = parentOf(T.scr); const from = M().from; if (p === 'mbbooking' || p === 'mbself' || p === 'mbdocs') { T.mb = { from }; go(p); } else go(p); },
+    mbfac: b => { T.mb = { from: M().from, fac: b.dataset.v, mo: 0 }; go('mbfac'); },
+    mbmonth: b => { const m = M(); m.mo = Math.max(0, (m.mo || 0) + (+b.dataset.v)); m.day = null; m.a = m.b = null; m.err = ''; rerender(); },
+    mbday: b => { const m = M(); m.day = b.dataset.v; m.a = m.b = null; m.err = ''; renderApp(true); scrollTo2(facOf(m.fac).slot === 'day' ? '#mbConfirm' : '.mb-slots'); },
+    mbslot: b => {
+      const m = M(), f = facOf(m.fac), v = +b.dataset.v;
+      if (m.a == null || m.b != null || v < m.a) { m.a = v; m.b = null; }
+      else if ((v + 30 * MIN - m.a) / H > f.maxH) { m.err = mt('e_maxh', f.maxH); rerender(); return; }
+      else if (overlaps(f.id, m.a, v + 30 * MIN)) { m.err = mt('e_overlap'); rerender(); return; }
+      else m.b = v;
+      m.err = ''; rerender(); if (m.b != null) scrollTo2('#mbConfirm');
+    },
+    mbbook: () => {
+      const m = M(), f = facOf(m.fac);
+      if (!m.rulesOk) { m.err = mt('e_rules'); rerender(); return; }
+      const r = f.slot === 'day' ? tryBook(f, m.day, null, null, m.note) : tryBook(f, m.day, hmOf(m.a), hmOf((m.b != null ? m.b : m.a) + 30 * MIN), m.note);
+      if (typeof r === 'string') { m.err = r; if (r === mt('e_taken')) { m.day = f.slot === 'day' ? null : m.day; m.a = m.b = null; } rerender(); return; }
+      T.mb = { from: m.from, receipt: r.id }; go('mbbooking'); renderDash();
+    },
+    mbcancel: b => { M().cancel = b.dataset.id; rerender(); },
+    mbcancelno: () => { M().cancel = null; rerender(); },
+    mbcancelok: b => { const bk = mb().bookings.find(x => x.id === b.dataset.id && x.tid === S.me); if (bk && bk.start > Date.now()) { bk.status = 'cancelled'; save(); toast('Booking aflyst: ' + me().name + ', ' + facName(facOf(bk.fac), 'da').toLowerCase() + ' ' + bookWhen(bk, 'da') + '.'); } M().cancel = null; M().receipt = null; rerender(); renderDash(); },
+    mbics: b => { const bk = mb().bookings.find(x => x.id === b.dataset.id); if (!bk) return; const f = facOf(bk.fac); downloadIcs(bk.id, cap(facName(f)), 'Engparken', bk); },
+    mbicsm: () => { const m = mb().meeting; downloadIcs('afdelingsmoede', mt('meet_h'), mt('place_v'), { start: atTime(m.day, m.at), end: atTime(m.day, m.at) + 2 * H }); },
+    mbcat: b => { M().cat = b.dataset.v; rerender(); },
+    mbdoc: b => { const d = DOCS.find(x => x.id === b.dataset.v); if (!d) return; if (d.open) { go(d.open); return; } const from = T.scr; T.mb = Object.assign({}, T.mb, { doc: d.id }); PARENT.mbdoc = from === 'mbdemo' ? 'mbdemo' : 'mbdocs'; go('mbdoc'); },
+    mbkind: b => { const k = b.dataset.v; if (k === 'opsigelse') { T.mb = { from: M().from }; go('mbops'); return; } T.mb = { from: M().from, kind: k, form: {}, formFrom: b.dataset.from || 'mbself' }; go('mbform'); },
+    mbsend: () => {
+      const m = M(), k = m.kind, F = m.form || {}, data = {};
+      for (const fd of FIELDS[k]) {
+        const v = (F[fd[0]] || '').trim();
+        if (!v && fd[3] !== 'opt') { m.err = mt('e_fill', mt(fd[1])); rerender(); focusF(fd[0]); return; }
+        if (fd[3] === 'min10' && v.length < 10) { m.err = mt('e_min10'); rerender(); focusF(fd[0]); return; }
+        if (v) data[fd[0]] = v;
+      }
+      if (k === 'fremleje' && data.to <= data.from) { m.err = mt('e_dates'); rerender(); return; }
+      const a = { id: nextId('a'), tid: S.me, kind: k, data, status: 'received', created: Date.now(), decided: null, reply: null };
+      mb().apps.push(a); save();
+      toast('Ny ansøgning (' + da('k_' + k).toLowerCase() + ') fra ' + me().name + ', ' + me().addr + '.');
+      const back = m.formFrom || 'mbself';
+      T.mb = { from: m.from, ok: mt('sent_ok') }; go(back === 'mbkontakt' || back === 'mbdemo' ? 'mbself' : back); renderDash();
+    },
+    mbwd: b => { M().wd = b.dataset.id; rerender(); },
+    mbwdno: () => { M().wd = null; rerender(); },
+    mbwdok: b => { const a = mb().apps.find(x => x.id === b.dataset.id && x.tid === S.me); if (a && a.status === 'received') { a.status = 'withdrawn'; a.decided = null; save(); renderDash(); } M().wd = null; rerender(); },
+    mbopsprev: () => { const o = M().ops; o.step = Math.max(1, o.step - 1); M().err = ''; rerender(); },
+    mbopsnext: () => {
+      const m = M(), o = m.ops;
+      if (o.step === 1 && !o.date) { m.err = mt('e_date'); rerender(); return; }
+      if (o.step < 3) { o.step++; m.err = ''; renderApp(); return; }
+      if (openOps()) { m.err = mt('e_exists'); rerender(); return; }
+      if (!moveOutOptions(6).includes(o.date) || o.date < earliestMoveOut(todayYmd())) { m.err = mt('e_date'); o.step = 1; rerender(); return; }
+      const data = { moveOutDate: o.date }; Object.keys(o.c).forEach(k => { const v = (o.c[k] || '').trim(); if (v) data[k] = v; });
+      mb().apps.push({ id: nextId('a'), tid: S.me, kind: 'opsigelse', data, status: 'received', created: Date.now(), decided: null, reply: null }); save();
+      toast('Opsigelse fra ' + me().name + ', ' + me().addr + '. Fraflytning ' + dDate(o.date, 'da') + '.', 'akut');
+      o.step = 4; m.err = ''; renderApp(); renderDash();
+    },
+    mbcall: () => { const n = $('#mbCallNote'); if (n) n.hidden = false; else toast(mt('demo_call')); }
+  });
+  function scrollTo2(sel) { setTimeout(() => { const el = $(sel); if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, 30); }
+  function focusF(k) { setTimeout(() => { const el = $('[data-mbf="' + k + '"]'); if (el) el.focus(); }, 0); }
+  document.addEventListener('input', e => {
+    const el = e.target; if (!el || !el.dataset) return;
+    if (el.dataset.mbf) (M().form || (M().form = {}))[el.dataset.mbf] = el.value;
+    else if (el.dataset.mbc) M().ops.c[el.dataset.mbc] = el.value;
+    else if (el.dataset.mbn) M().note = el.value;
+    else if (el.dataset.mbq) { M().q = el.value; const l = $('#mbDocList'); if (l) l.innerHTML = docList(el.value.trim().toLowerCase(), M().cat || 'all'); }
+  });
+  document.addEventListener('change', e => {
+    const el = e.target; if (!el || !el.dataset) return;
+    if (el.dataset.mbk) { M()[el.dataset.mbk] = el.checked; if (el.checked && M().err === mt('e_rules')) { M().err = ''; rerender(); } }
+    else if (el.dataset.mbd) { M().ops.date = el.value; M().err = ''; }
+  });
+
+  /* ---------- Driftslederen: Selvbetjening ---------- */
+  PAGES_L.splice(4, 0, ['selvbetjening', 'Selvbetjening', 'doc']);
+  const DA_F = { description: 'Beskrivelse', animal: 'Dyr', from: 'Fra', to: 'Til', reason: 'Årsag', appliance: 'Hvidevare', title: 'Overskrift', text: 'Tekst', subject: 'Emne', moveOutDate: 'Fraflytning', newAddress: 'Ny adresse', email: 'E-mail', phone: 'Telefon' };
+  const TPL = {
+    approved: { raaderet: 'Godkendt. Arbejdet skal udføres af autoriserede håndværkere, og du skal sende dokumentation, når det er færdigt.', husdyr: 'Godkendt. Dyret skal registreres, og husordenens regler om husdyr gælder.', fremleje: 'Godkendt i den ønskede periode. Du hæfter fortsat for huslejen.', hvidevarer: 'Godkendt. Viceværten kontakter dig og aftaler et tidspunkt.', opsigelse: 'Vi har modtaget din opsigelse og bekræfter fraflytningsdatoen. Vi kontakter dig om flyttesyn.', forslag: 'Tak for forslaget. Det kommer på dagsordenen til afdelingsmødet.', andet: 'Tak for din henvendelse. Vi vender tilbage.' },
+    rejected: { raaderet: 'Desværre kan vi ikke godkende ændringen, fordi den berører bærende konstruktioner. Ring gerne, så finder vi en løsning.', husdyr: 'Desværre. Husordenen tillader ikke den type dyr i afdelingen.', fremleje: 'Desværre. Perioden er for lang til fremleje efter reglerne.', hvidevarer: 'Hvidevaren er under 5 år og repareres i stedet. Viceværten kontakter dig.', opsigelse: 'Datoen er ikke gyldig. Ring til driftskontoret, så finder vi den rigtige dato.', forslag: 'Forslaget kom efter fristen og kan tages op under Eventuelt.', andet: 'Tak for din henvendelse.' }
+  };
+  const DS = { sel: null, reply: {}, err: '' };
+  const pending = () => mb().apps.filter(a => a.status === 'received').length;
+  function staffAppCard(a) {
+    const x = tenant(a.tid), open = DS.sel === a.id;
+    let h = '<article class="card mb-sapp' + (open ? ' open' : '') + '"><button type="button" class="mb-sh" data-a="mbssel" data-id="' + a.id + '" aria-expanded="' + open + '"><span><strong>' + esc(da('k_' + a.kind)) + '</strong><small>' + esc(x.name + ' · ' + x.addr + ' · ' + fmtDL(new Date(a.created), 'da')) + '</small></span><span class="mb-st mb-st-' + a.status + '">' + esc(da('s_' + a.status)) + '</span></button>';
+    if (!open) return h + '</article>';
+    h += '<dl class="mb-dl">' + Object.keys(a.data || {}).map(k => '<div><dt>' + esc(DA_F[k] || k) + '</dt><dd dir="auto">' + esc(k === 'moveOutDate' || k === 'from' || k === 'to' ? fmtDL(parseYmd(a.data[k]), 'da') : a.data[k]) + '</dd></div>').join('') + '</dl>';
+    if (a.kind === 'opsigelse') h += '<p class="fine">Datoen er tjekket efter almenlejeloven § 88. En godkendelse sætter slutdatoen på lejemålet.</p>';
+    if (a.status === 'received') {
+      const r = DS.reply[a.id] != null ? DS.reply[a.id] : TPL.approved[a.kind];
+      h += '<label class="field-l" for="mbr_' + a.id + '">Svar til beboeren</label><textarea id="mbr_' + a.id + '" rows="3" data-mbr="' + a.id + '">' + esc(r) + '</textarea>'
+        + '<p class="fine">Beboeren får svaret som notifikation i appen og kan se det under Min bolig.' + (x.lang !== 'da' ? ' Beboeren bruger appen på ' + (LANGS[x.lang] || x.lang).toLowerCase() + '. Svaret vises på dansk.' : '') + '</p>' + (DS.err ? '<p class="err" role="alert">' + esc(DS.err) + '</p>' : '')
+        + '<div class="mb-btns"><button type="button" class="btn btn-primary btn-sm" data-a="mbsdec" data-id="' + a.id + '" data-v="approved">' + ic('check') + 'Godkend</button><button type="button" class="btn btn-secondary btn-sm" data-a="mbstpl" data-id="' + a.id + '">Skift til afslag</button><button type="button" class="btn btn-danger btn-sm" data-a="mbsdec" data-id="' + a.id + '" data-v="rejected">' + ic('x') + 'Afslå</button></div>';
+    } else if (a.reply) h += '<blockquote class="mb-reply"><span class="eyebrow">Svar · ' + esc(fmtDL(new Date(a.decided), 'da')) + '</span><p>' + esc(a.reply) + '</p></blockquote>';
+    return h + '</article>';
+  }
+  function selvbetjeningHtml() {
+    const apps = mb().apps.slice().sort((a, b) => (a.status === 'received' ? 0 : 1) - (b.status === 'received' ? 0 : 1) || b.created - a.created);
+    const rec = apps.filter(a => a.status === 'received'), rest = apps.filter(a => a.status !== 'received').slice(0, 12);
+    const bk = mb().bookings.filter(b => active(b) && b.tid !== 'x' && b.end > Date.now()).sort((a, b) => a.start - b.start).slice(0, 12);
+    let h = '<div class="mb-staff"><section class="card"><div class="card-h"><h4>' + ic('doc') + 'Nye ansøgninger og blanketter</h4></div>'
+      + (rec.length ? rec.map(staffAppCard).join('') : '<p class="empty">Ingen nye. Når en beboer sender en ansøgning i appen, kommer den her.</p>') + '</section>';
+    h += '<section class="card"><div class="card-h"><h4>' + ic('cal') + 'Kommende bookinger af fælleslokaler</h4></div>' + (bk.length ? '<ul class="mb-sbk">' + bk.map(b => { const x = tenant(b.tid); return '<li><strong>' + esc(cap(facName(facOf(b.fac), 'da'))) + '</strong><span>' + esc(bookWhen(b, 'da')) + '</span><small>' + esc(x.name + ' · ' + x.addr) + (b.note ? ' · "' + esc(b.note) + '"' : '') + '</small></li>'; }).join('') + '</ul>' : '<p class="empty">Ingen kommende bookinger fra beboerne i demoen.</p>') + '</section>';
+    h += '<section class="card"><div class="card-h"><h4>' + ic('check') + 'Besvarede</h4></div>' + (rest.length ? rest.map(staffAppCard).join('') : '<p class="empty">Ingen endnu.</p>') + '</section></div>';
+    return h;
+  }
+  const _renderDash = renderDash;
+  renderDash = function () {
+    _renderDash.apply(this, arguments);
+    const n = pending();
+    document.querySelectorAll('[data-a="page"][data-v="selvbetjening"]').forEach(b => { const old = b.querySelector('.nb'); if (old) old.remove(); if (n) b.insertAdjacentHTML('beforeend', '<b class="nb">' + n + '</b>'); });
+    const me0 = staffMe(); if (!me0 || me0.caretaker) return;
+    const main = $('#dash .s-main'); if (!main) return;
+    if (D.page === 'overblik' && n) {
+      const head = main.querySelector('.s-head');
+      if (head) head.insertAdjacentHTML('afterend', '<button type="button" class="mb-alert" data-a="page" data-v="selvbetjening">' + ic('doc') + '<span><strong>' + n + (n === 1 ? ' ny ansøgning' : ' nye ansøgninger') + ' fra beboerne</strong><small>Råderet, husdyr, fremleje, opsigelser og forslag fra Min bolig. Svar dem under Selvbetjening.</small></span>' + ic('chev') + '</button>');
+    }
+    if (D.page !== 'selvbetjening') return;
+    main.innerHTML = '<div class="s-head"><div><span class="eyebrow">Selvbetjening</span><h2>Ansøgninger og bookinger</h2><p>Det, beboerne sender fra "Min bolig" i appen og på hjemmesiden: råderet, husdyr, fremleje, hvidevarer, opsigelser og forslag.</p></div></div>' + selvbetjeningHtml();
+  };
+  Object.assign(V9_ACTS, {
+    mbssel: b => { DS.sel = DS.sel === b.dataset.id ? null : b.dataset.id; DS.err = ''; renderDash(); },
+    mbstpl: b => { const a = mb().apps.find(x => x.id === b.dataset.id); if (!a) return; const cur = DS.reply[a.id]; DS.reply[a.id] = cur === TPL.rejected[a.kind] ? TPL.approved[a.kind] : TPL.rejected[a.kind]; renderDash(); },
+    mbsdec: b => {
+      const a = mb().apps.find(x => x.id === b.dataset.id); if (!a || a.status !== 'received') return;
+      const ta = $('[data-mbr="' + a.id + '"]'), r = (ta ? ta.value : '').trim();
+      if (r.length < 2) { DS.err = 'Skriv et svar til beboeren.'; renderDash(); return; }
+      a.status = b.dataset.v; a.reply = r; a.replyT = null; a.decided = Date.now(); a.by = (staffMe() || {}).id; a.seen = false;
+      delete DS.reply[a.id]; DS.sel = null; DS.err = ''; save();
+      toast((a.status === 'approved' ? 'Godkendt' : 'Afslået') + ': ' + da('k_' + a.kind).toLowerCase() + ' fra ' + tenant(a.tid).name + '. Beboeren har fået svaret i appen.');
+      renderDash(); if (phoneVisible()) refreshApp();
+    }
+  });
+  document.addEventListener('input', e => { const el = e.target; if (el && el.dataset && el.dataset.mbr) DS.reply[el.dataset.mbr] = el.value; });
+
+  mb();
+})();
+
 /* ---- app-tilstand ---- */
 /* App-tilstand: demoen som telefon-app (Mitboli). Kører efter demoens egen kode og bruger dens funktioner.
    - Startskærm med valg af rolle (beboer, vicevært, driftsleder) og login med ét tryk
@@ -5299,7 +6095,7 @@ paintAI();
   function h(s) { return esc(String(s == null ? '' : s)); }
 
   var AP = { step: 'roles', sheet: null, resetArmed: false };
-  var SHORT = { overblik: 'Overblik', sager: 'Sager', kalender: 'Kalender', beboere: 'Beboere', beskeder: 'Beskeder', syn: 'Syn', indsigt: 'Indsigt', dag: 'Min dag', opgaver: 'Opgaver' };
+  var SHORT = { selvbetjening: 'Selvbetjening', overblik: 'Overblik', sager: 'Sager', kalender: 'Kalender', beboere: 'Beboere', beskeder: 'Beskeder', syn: 'Syn', indsigt: 'Indsigt', dag: 'Min dag', opgaver: 'Opgaver' };
   var PRIMARY = { manager: ['overblik', 'sager', 'beboere', 'beskeder'], caretaker: ['dag', 'opgaver', 'kalender', 'syn', 'beboere'] };
 
   /* ---------- Startskærm ---------- */
@@ -5533,7 +6329,12 @@ paintAI();
       var me = staffMe(), first = me ? pagesFor(me)[0][0] : null;
       if (first && D.page !== first) { D.page = first; renderDash(); window.scrollTo(0, 0); return true; }
     }
-    if (v === 'tenant' && T.scr !== 'home') { go(T.scr === 'case' ? (T.prev || 'cases') : (BACK_T[T.scr] || 'home')); return true; }
+    if (v === 'tenant' && T.scr !== 'home') {
+      // Min bolig (min-bolig.js): samme vej tilbage som pilen øverst på skærmen.
+      var mbb = window.__mbBackFor && window.__mbBackFor(T.scr) ? document.querySelector('#app [data-a="mbback"]') : null;
+      if (mbb) { mbb.click(); return true; }
+      go(T.scr === 'case' ? (T.prev || 'cases') : (BACK_T[T.scr] || 'home')); return true;
+    }
     if (v === 'login' && (AP.step !== 'roles' || (LG.mode && LG.mode !== 'list'))) { AP.step = AP.step === 'tenant' && LG.mode && LG.mode !== 'list' ? 'tenant' : 'roles'; LG.mode = 'list'; renderLogin(); return true; }
     post({ type: 'exit' });
     return false;
@@ -5732,4 +6533,151 @@ html.app #app.ap-enter>.app-body,html.app #app.ap-enter>.app-hero{animation:page
 
 /* Web-appen på iPhone: bundmenuen holder fri af stregen nederst på skærmen (i den native app er værdien 0) */
 #apTabs .snav{padding-bottom:calc(8px + env(safe-area-inset-bottom))}
+/* Min bolig i appen (min-bolig.js) */
+.btn-danger{background:var(--akut);color:var(--on-akut)}
+.mb-tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.mb-tile{display:flex;flex-direction:column;gap:8px;align-items:flex-start;text-align:start;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-l);padding:12px;min-height:112px;color:var(--ink)}
+.mb-tile:active,.mb-kind:active,.mb-q:active{transform:scale(.98)}
+.mb-tile strong{display:block;font-size:14.5px;line-height:1.25}
+.mb-tile small{display:block;font-size:12px;color:var(--muted);line-height:1.35;margin-top:2px}
+.mb-ti{width:36px;height:36px;flex:none;display:grid;place-items:center;border-radius:12px;background:var(--brand-tint);color:var(--brand-strong)}
+.mb-ti .ic{width:20px;height:20px}
+.mb-quick{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.mb-q{display:flex;flex-direction:column;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-m);padding:10px 4px;font-size:12px;font-weight:600;color:var(--ink);line-height:1.2;text-align:center}
+.mb-q .ic{width:22px;height:22px;color:var(--brand)}
+.mb-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-l);padding:14px 16px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.mb-h{font-size:15px;font-weight:700;margin:0}
+.mb-big{font-family:var(--f-display);font-size:30px;font-weight:800;font-stretch:94%;line-height:1.1}
+.mb-big2{font-family:var(--f-display);font-size:20px;font-weight:800;font-stretch:94%;line-height:1.2;margin:2px 0 0}
+.mb-row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.mb-st{display:inline-flex;align-items:center;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap;background:var(--surface-2);color:var(--muted)}
+.mb-st-received{background:var(--normal-tint);color:var(--normal)}
+.mb-st-approved{background:var(--ok-tint);color:var(--ok)}
+.mb-st-rejected{background:var(--akut-tint);color:var(--akut)}
+.mb-st-withdrawn{background:var(--surface-2);color:var(--muted)}
+.mb-next .mb-st{margin-inline-start:6px}
+.mb-bar{display:flex;height:14px;border-radius:999px;overflow:hidden;background:var(--surface-2);margin-top:2px}
+.mb-bar span{display:block;height:100%}
+.mb-lines{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:14px}
+.mb-lines li{display:flex;justify-content:space-between;gap:10px}
+.mb-lines li span:first-child{display:flex;align-items:center;gap:8px}
+.mb-lines i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.mb-lines .tot{border-top:1px solid var(--line);padding-top:8px;font-weight:700}
+.mb-qa summary{font-size:13px}
+.mb-qa p{font-size:13.5px;line-height:1.45;margin-top:6px;color:var(--muted)}
+.mb-list{display:flex;flex-direction:column;gap:8px}
+.mb-li{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-m);padding:10px 12px;min-width:0}
+.mb-li>span:nth-child(2),.mb-li>span:first-child:not(.cic):not(.av){flex:1;min-width:0}
+.mb-li strong{display:block;font-size:14px;font-weight:600}
+.mb-li small{display:block;font-size:12.5px;color:var(--muted)}
+.mb-amt{display:flex;flex-direction:column;align-items:flex-end;gap:3px;font-weight:600;font-size:14px;white-space:nowrap}
+.mb-cons{display:flex;flex-direction:column;gap:6px;padding:4px 0}
+.mb-cons+.mb-cons{border-top:1px solid var(--line);padding-top:10px}
+.mb-neg{color:var(--hoej);font-weight:700;font-size:13px}
+.mb-pos{color:var(--ok);font-weight:700;font-size:13px}
+.mb-bars{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:6px 10px;font-size:12.5px;color:var(--muted)}
+.mb-bars i{display:block;height:10px;border-radius:999px;background:var(--line-strong)}
+.mb-bars i.act{background:var(--brand)}
+.mb-bars b{color:var(--ink);font-weight:600}
+.mb-fac{gap:10px}
+.mb-fh{display:flex;gap:12px;align-items:flex-start}
+.mb-fh strong{display:block;font-size:15.5px}
+.mb-fh small{display:block;font-size:13px;color:var(--muted);line-height:1.4}
+.mb-dl{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr);gap:4px 12px;margin:0;font-size:13.5px}
+.mb-dl>div{display:contents}
+.mb-dl dt{color:var(--muted)}
+.mb-dl dt .ic{width:16px;height:16px;color:var(--brand)}
+.mb-dl dd{margin:0;font-weight:600;overflow-wrap:anywhere}
+.mb-bk .cic,.mb-li .cic{width:36px;height:36px;flex:none;display:grid;place-items:center;border-radius:10px;background:var(--brand-tint);color:var(--brand-strong)}
+.mb-acts{display:flex;gap:6px}
+.mb-confirm{background:var(--akut-tint);border-radius:var(--r-m);padding:12px;display:flex;flex-direction:column;gap:6px}
+.mb-confirm p{font-weight:600;font-size:14px}
+.mb-btns{display:flex;flex-wrap:wrap;gap:8px}
+.mb-btns .btn{flex:1 1 140px;margin-top:0}
+.mb-receipt{flex-direction:row;align-items:flex-start;gap:12px;border-color:var(--ok);background:var(--ok-tint)}
+.mb-receipt>.ic{width:28px;height:28px;flex:none;color:var(--ok)}
+.mb-receipt strong{font-size:15.5px}
+.mb-receipt p{font-size:13.5px;margin-top:2px}
+.mb-receipt .btn{margin-top:8px}
+.mb-ok{display:flex;gap:8px;align-items:flex-start;background:var(--ok-tint);color:var(--ok);border-radius:var(--r-m);padding:10px 12px;font-size:13.5px;font-weight:600}
+.mb-ok .ic{width:18px;height:18px;flex:none}
+.mb-calh{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.mb-calh strong{font-size:15px;text-transform:capitalize}
+.mb-calh .icon-btn[disabled]{opacity:.3}
+.mb-cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.mb-wd{text-align:center;font-size:11.5px;font-weight:700;color:var(--muted);padding:4px 0;text-transform:uppercase}
+.mb-d{aspect-ratio:1;min-height:38px;border-radius:10px;border:1px solid var(--line);background:var(--surface);font-size:14px;font-weight:600;color:var(--ink);display:grid;place-items:center;font-variant-numeric:tabular-nums}
+.mb-d-off{border-color:transparent;background:transparent;color:var(--faint);font-weight:400}
+.mb-d-busy{background:var(--surface-2);color:var(--faint);text-decoration:line-through;border-color:transparent}
+.mb-d-mine{background:var(--brand-tint);color:var(--brand-strong);border-color:var(--brand)}
+.mb-d.today{box-shadow:inset 0 0 0 2px var(--line-strong)}
+.mb-d.sel{background:var(--brand);color:var(--on-brand);border-color:var(--brand)}
+.mb-legend{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.mb-legend .mb-d{width:26px;min-height:26px;font-size:11px;border-radius:7px}
+.mb-legend .mb-d+*{margin-inline-end:8px}
+.mb-slots{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.mb-slot{border:1px solid var(--line-strong);background:var(--surface);border-radius:8px;padding:9px 0;font-size:13.5px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+.mb-slot.busy{background:var(--surface-2);color:var(--faint);text-decoration:line-through;border-color:transparent}
+.mb-slot.sel{background:var(--brand);border-color:var(--brand);color:var(--on-brand)}
+.mb-rules{font-size:13px;color:var(--muted);line-height:1.45;background:var(--surface-2);border-radius:var(--r-m);padding:10px 12px}
+.mb-check{display:flex;gap:10px;align-items:center;font-size:14.5px;font-weight:600;padding:6px 0}
+.mb-check input,.mb-radio input{width:22px;height:22px;flex:none;accent-color:var(--brand)}
+.mb-search{position:relative}
+.mb-search .ic{position:absolute;inset-inline-start:12px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--muted)}
+.mb-search input{padding-inline-start:38px}
+.mb-cats{display:flex;gap:6px;overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px;scrollbar-width:none}
+.mb-cats::-webkit-scrollbar{display:none}
+.mb-cats .lchip{white-space:nowrap}
+.mb-cats .lchip[aria-pressed="true"]{background:var(--brand);color:var(--on-brand);border-color:var(--brand)}
+.mb-doc small+.mb-st{margin-top:4px}
+.mb-p{font-size:14px;line-height:1.55;margin:8px 0}
+.mb-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.mb-kind{display:flex;flex-direction:column;align-items:flex-start;gap:6px;text-align:start;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-l);padding:12px;color:var(--ink)}
+.mb-kind strong{font-size:14px;line-height:1.25}
+.mb-kind small{font-size:12px;color:var(--muted);line-height:1.35;flex:1}
+.mb-fill{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;font-weight:700;color:var(--brand)}
+.mb-fill .ic{width:14px;height:14px}
+.mb-app{gap:6px}
+.mb-app .link{align-self:flex-start;font-size:13px}
+.mb-tl{list-style:none;margin:2px 0 0;padding:0;display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}
+.mb-tl li{position:relative;padding-inline-start:18px}
+.mb-tl li::before{content:"";position:absolute;inset-inline-start:2px;top:5px;width:8px;height:8px;border-radius:50%;border:2px solid var(--line-strong);background:var(--surface)}
+.mb-tl li.done::before{background:var(--brand);border-color:var(--brand)}
+.mb-reply{margin:4px 0 0;border-inline-start:3px solid var(--brand);background:var(--brand-tint);padding:8px 12px;border-radius:0 var(--r-m) var(--r-m) 0}
+[dir="rtl"] .mb-reply{border-radius:var(--r-m) 0 0 var(--r-m)}
+.mb-reply p{font-size:13.5px;line-height:1.45;margin-top:2px;color:var(--ink)}
+.mb-hint{background:var(--surface-2);border-radius:var(--r-m);padding:8px 10px}
+.mb-note{font-size:13.5px;line-height:1.45;background:var(--brand-tint);color:var(--brand-strong);border-radius:var(--r-m);padding:10px 12px}
+.mb-warn{font-size:14px;line-height:1.45;background:var(--hoej-tint);color:var(--ink);border-radius:var(--r-m);padding:12px}
+.mb-radios{border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.mb-radios legend{margin-bottom:8px}
+.mb-radio{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--r-m);padding:12px;font-size:14.5px;font-weight:600}
+.mb-radio:has(input:checked){border-color:var(--brand);background:var(--brand-tint)}
+.mb-bul{margin:0;padding-inline-start:18px;font-size:13px;color:var(--muted);line-height:1.5}
+.mb-agenda{margin:0;padding-inline-start:20px;font-size:14px;line-height:1.6}
+.mb-akut{background:var(--akut-tint);border-color:transparent}
+.mb-akut>strong{display:flex;gap:8px;align-items:center;color:var(--akut);font-size:15px}
+.mb-akut>strong .ic{width:20px;height:20px}
+.mb-akut p{font-size:13.5px}
+.mb-akut .btn{margin-top:4px}
+.mb-callnote{color:var(--ink);font-weight:600}
+/* Driftslederen */
+.mb-staff{display:flex;flex-direction:column;gap:16px}
+.mb-sapp{padding:0;gap:0;overflow:hidden}
+.mb-sapp+.mb-sapp{margin-top:0}
+.mb-sh{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;text-align:start;background:none;border:0;padding:12px 14px;color:var(--ink)}
+.mb-sh strong{display:block;font-size:14.5px}
+.mb-sh small{display:block;font-size:12.5px;color:var(--muted)}
+.mb-sapp.open{border-color:var(--brand)}
+.mb-sapp.open>*:not(.mb-sh){margin:0 14px 12px}
+.mb-sapp .mb-btns .btn{flex:0 1 auto}
+.mb-sbk{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.mb-sbk li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;border-bottom:1px solid var(--line);padding-bottom:8px;font-size:14px}
+.mb-sbk small{grid-column:1/-1;color:var(--muted);font-size:12.5px}
+@media (max-width:360px){.mb-quick{grid-template-columns:repeat(2,minmax(0,1fr))}.mb-grid,.mb-tiles{grid-template-columns:minmax(0,1fr)}}
+.mb-alert{display:flex;align-items:center;gap:12px;width:100%;text-align:start;background:var(--normal-tint);color:var(--ink);border:1px solid transparent;border-radius:var(--r-m);padding:12px 14px;margin-bottom:14px}
+.mb-alert>.ic:first-child{width:22px;height:22px;flex:none;color:var(--normal)}
+.mb-alert span{flex:1;min-width:0}
+.mb-alert strong{display:block;font-size:14.5px}
+.mb-alert small{display:block;font-size:12.5px;color:var(--muted)}
 </style><script src="pwa.js"></script></html>

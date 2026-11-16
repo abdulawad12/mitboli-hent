@@ -1,7 +1,7 @@
 {
   "name": "Mitboli",
   "short_name": "Mitboli",
-  "description": "Meld fejl, følg sager og hold syn. Demo med opdigtede data.",
+  "description": "Meld fejl, følg sager, book lokaler og find alt om din bolig. Demo med opdigtede data.",
   "lang": "da",
   "dir": "ltr",
   "start_url": "./",
